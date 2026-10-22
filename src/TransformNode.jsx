@@ -63,7 +63,11 @@ function TransformNode({ data }) {
           variant="caption"
           noWrap
           title={data.preview ?? '—'}
-          sx={{ fontFamily: 'monospace', color: data.preview != null ? '#66d19e' : 'text.disabled' }}
+          sx={{
+            display: 'block',
+            fontFamily: 'monospace',
+            color: data.preview != null ? '#66d19e' : 'text.disabled',
+          }}
         >
           {data.preview ?? '—'}
         </Typography>

@@ -30,17 +30,39 @@ import {
 } from '@mui/material'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
+import AbcIcon from '@mui/icons-material/Abc'
+import NumbersIcon from '@mui/icons-material/Numbers'
+import ToggleOnIcon from '@mui/icons-material/ToggleOn'
+import DataArrayIcon from '@mui/icons-material/DataArray'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import DataObjectIcon from '@mui/icons-material/DataObject'
+import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import JsonNode, { toEntries } from './JsonNode.jsx'
 import TransformNode from './TransformNode.jsx'
+import RuleOutputNode from './RuleOutputNode.jsx'
+import InputNode from './InputNode.jsx'
 import { validateJson } from './validateJson.js'
 import sampleInputText from '../sample_json.json?raw'
 import sampleOutputText from '../sample_output.json?raw'
 
 import TRANSFORMS, { TRANSFORM_LIST } from './transforms/index.js'
+import OUTPUT_NODES, { OUTPUT_NODE_LIST, DEBUG_NODE_LIST } from './outputNodes.js'
+import INPUT_NODES, { INPUT_NODE_LIST } from './inputNodes.js'
 
-const nodeTypes = { jsonNode: JsonNode, transform: TransformNode }
+const nodeTypes = {
+  jsonNode: JsonNode,
+  transform: TransformNode,
+  ruleOutput: RuleOutputNode,
+  stringInput: InputNode,
+}
+
+const INPUT_TYPE_ICONS = {
+  string: AbcIcon,
+  number: NumbersIcon,
+  boolean: ToggleOnIcon,
+  array: DataArrayIcon,
+}
 
 const TEXT_KEY = 'json-node-texts-v1'
 const GRAPH_KEY = 'json-node-graph-v1'
@@ -87,7 +109,9 @@ function Canvas({ jsonData, outputData, sig }) {
   const [collapsed, setCollapsed] = useState({})
   const [nodeParams, setNodeParams] = useState({})
   const txIdRef = useRef(0)
-  const { fitView, screenToFlowPosition, getNode } = useReactFlow()
+  const outIdRef = useRef(0)
+  const inIdRef = useRef(0)
+  const { fitView, screenToFlowPosition, getNode, getNodes } = useReactFlow()
 
   const isMultiTarget = useCallback(
     (nodeId) => {
@@ -141,7 +165,7 @@ function Canvas({ jsonData, outputData, sig }) {
         setSel((s) =>
           s?.nodeId === nodeId && s.rowId === rowId ? null : { nodeId, rowId },
         )
-      } else if (nodeId === 'fields') {
+      } else {
         if (pendingSource) {
           setEdges((eds) =>
             upsertEdge(
@@ -149,7 +173,7 @@ function Canvas({ jsonData, outputData, sig }) {
                 id: `e-${pendingSource}-${rowId}`,
                 source: 'json-root',
                 sourceHandle: `s-${pendingSource}`,
-                target: 'fields',
+                target: nodeId,
                 targetHandle: `t-${rowId}`,
               },
               eds,
@@ -179,12 +203,39 @@ function Canvas({ jsonData, outputData, sig }) {
     setSel(null)
   }, [])
 
+  const duplicateSelected = useCallback(() => {
+    const selNodes = getNodes().filter((n) => n.selected && n.type !== 'jsonNode')
+    if (!selNodes.length) return
+    const created = selNodes.map((n) => {
+      const prefix = /^[a-z]+/.exec(n.id)?.[0]
+      const ref = prefix === 'out' ? outIdRef : prefix === 'in' ? inIdRef : txIdRef
+      return {
+        ...n,
+        id: `${prefix ?? 'tx'}-${++ref.current}`,
+        position: { x: n.position.x + 32, y: n.position.y + 32 },
+        selected: true,
+        data: { ...n.data },
+      }
+    })
+    setNodeParams((p) => {
+      const q = { ...p }
+      selNodes.forEach((n, i) => {
+        if (p[n.id]) q[created[i].id] = { ...p[n.id] }
+      })
+      return q
+    })
+    setNodes((ns) => [
+      ...ns.map((n) => (n.selected ? { ...n, selected: false } : n)),
+      ...created,
+    ])
+  }, [getNodes, setNodes])
+
   const onNodeClick = useCallback(
     (_, node) => {
       if (
         pendingSource &&
-        node.type === 'transform' &&
-        TRANSFORMS[node.data.transformId]?.multiInput
+        (node.type === 'stringInput' ||
+          (node.type === 'transform' && TRANSFORMS[node.data.transformId]?.multiInput))
       ) {
         setEdges((eds) =>
           upsertEdge(
@@ -201,12 +252,12 @@ function Canvas({ jsonData, outputData, sig }) {
         setPendingSource(null)
         return
       }
-      if (node.type === 'transform') setSel({ nodeId: node.id })
+      if (node.type !== 'jsonNode') setSel({ nodeId: node.id })
     },
     [pendingSource, setEdges, upsertEdge],
   )
 
-  const makeResolver = useCallback((eds, inputObj, tNodes, paramsMap) => {
+  const makeResolver = useCallback((eds, inputObj, nodeMap, paramsMap, fieldsValue) => {
     const edgeVal = (e, depth) => {
       if (!e || depth > 12) return undefined
       if (e.source === 'json-root') {
@@ -215,8 +266,38 @@ function Canvas({ jsonData, outputData, sig }) {
           .split('.')
           .reduce((o, k) => (o == null ? o : o[k]), inputObj)
       }
-      const tn = tNodes[e.source]
+      if (e.source === 'fields') {
+        if (e.sourceHandle === 's-root') return fieldsValue
+        return edgeVal(
+          eds.find(
+            (x) => x.target === 'fields' && x.targetHandle === `t-${e.sourceHandle?.slice(2)}`,
+          ),
+          depth + 1,
+        )
+      }
+      const tn = nodeMap[e.source]
       if (!tn) return undefined
+      if (tn.type === 'ruleOutput') {
+        const odef = OUTPUT_NODES[tn.data.kind]
+        if (!odef) return undefined
+        const params = paramsMap[tn.id] ?? {}
+        const obj = {}
+        for (const f of odef.fields) {
+          const v = edgeVal(
+            eds.find((x) => x.target === tn.id && x.targetHandle === `t-${f.key}`),
+            depth + 1,
+          )
+          obj[f.key] = v === undefined ? (params[f.key] ?? f.default) : v
+        }
+        return obj
+      }
+      if (tn.type === 'stringInput') {
+        const def = INPUT_NODES[tn.data.kind] ?? INPUT_NODES.string_field
+        const inEdge = eds.find((x) => x.target === tn.id)
+        return inEdge
+          ? def.coerce(edgeVal(inEdge, depth + 1))
+          : def.parse(paramsMap[tn.id])
+      }
       const def = TRANSFORMS[tn.data.transformId]
       if (!def) return undefined
       const ins = eds.filter((x) => x.target === tn.id)
@@ -283,16 +364,60 @@ function Canvas({ jsonData, outputData, sig }) {
     [setNodes, setEdges],
   )
 
+  const insertOutputNode = useCallback(
+    (kind, pos) => {
+      const def = OUTPUT_NODES[kind]
+      if (!def) return
+      const oId = `out-${++outIdRef.current}`
+      setNodes((ns) => [
+        ...ns,
+        {
+          id: oId,
+          type: 'ruleOutput',
+          position: { x: pos.x - 130, y: pos.y - 40 },
+          data: { kind, label: def.label },
+        },
+      ])
+    },
+    [setNodes],
+  )
+
+  const insertInputNode = useCallback(
+    (kind, pos) => {
+      const def = INPUT_NODES[kind]
+      if (!def) return
+      const iId = `in-${++inIdRef.current}`
+      setNodes((ns) => [
+        ...ns,
+        {
+          id: iId,
+          type: 'stringInput',
+          position: { x: pos.x - 110, y: pos.y - 30 },
+          data: { kind, label: def.label },
+        },
+      ])
+      setNodeParams((p) => ({
+        ...p,
+        [iId]: {
+          value: Array.isArray(def.defaultValue)
+            ? [...def.defaultValue]
+            : (def.defaultValue ?? ''),
+        },
+      }))
+    },
+    [setNodes],
+  )
+
   const onBeforeDelete = useCallback(
     ({ nodes: dNodes }) => {
-      if (!dNodes.some((n) => n.type === 'transform')) return true
+      if (!dNodes.some((n) => n.type !== 'jsonNode')) return true
       setEdges((eds) => {
         let next = eds
-        for (const n of dNodes.filter((n) => n.type === 'transform')) {
+        for (const n of dNodes.filter((n) => n.type !== 'jsonNode')) {
           const inEs = next.filter((e) => e.target === n.id)
           const outEs = next.filter((e) => e.source === n.id)
           next = next.filter((e) => !inEs.includes(e) && !outEs.includes(e))
-          if (inEs.length === 1) {
+          if (n.type !== 'ruleOutput' && inEs.length === 1) {
             for (const outE of outEs) {
               next = addEdge(
                 {
@@ -337,14 +462,31 @@ function Canvas({ jsonData, outputData, sig }) {
     e.preventDefault()
     setDropEdgeId(null)
     const type = e.dataTransfer.getData('application/x-transform-node')
+    const outType = e.dataTransfer.getData('application/x-output-node')
+    const inType = e.dataTransfer.getData('application/x-input-node')
+    const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+    if (outType) {
+      insertOutputNode(outType, pos)
+      return
+    }
+    if (inType) {
+      insertInputNode(inType, pos)
+      return
+    }
     if (!type) return
     const edge = edges.find((x) => x.id === edgeAtPoint(e))
-    insertTransform(type, edge, screenToFlowPosition({ x: e.clientX, y: e.clientY }))
+    insertTransform(type, edge, pos)
   }
 
   useEffect(() => {
-    if (!pendingSource && !sel) return
     const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
+        if (['TEXTAREA', 'INPUT'].includes(e.target?.tagName) || e.target?.isContentEditable)
+          return
+        e.preventDefault()
+        duplicateSelected()
+        return
+      }
       if (e.key === 'Escape') {
         setPendingSource(null)
         setSel(null)
@@ -352,7 +494,7 @@ function Canvas({ jsonData, outputData, sig }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [pendingSource, sel])
+  }, [duplicateSelected])
 
   useEffect(() => {
     if (
@@ -366,7 +508,7 @@ function Canvas({ jsonData, outputData, sig }) {
         id: 'fields',
         type: 'jsonNode',
         position: { x: 620, y: 60 },
-        data: { name: 'OUTPUT JSON', value: outputData ?? {} },
+        data: { name: 'OUTPUT JSON', value: outputData ?? {}, rootHandle: true },
       },
     ]
     const edges = []
@@ -400,17 +542,43 @@ function Canvas({ jsonData, outputData, sig }) {
       const txNodes = (restored.transforms ?? [])
         .map((t) => ({
           id: t.id,
-          type: 'transform',
+          type: t.type ?? 'transform',
           position: t.position,
           data: {
-            label: t.data?.label ?? TRANSFORMS[t.data?.transformId]?.label,
+            label: t.data?.label,
             transformId: t.data?.transformId,
+            kind: t.data?.kind,
           },
         }))
-        .filter((t) => TRANSFORMS[t.data.transformId])
+        .filter((t) =>
+          t.type === 'ruleOutput'
+            ? !!OUTPUT_NODES[t.data.kind]
+            : t.type === 'stringInput'
+              ? !!INPUT_NODES[t.data.kind]
+              : !!TRANSFORMS[t.data.transformId],
+        )
+        .map((t) => ({
+          ...t,
+          data: {
+            ...t.data,
+            label:
+              t.data.label ??
+              (t.type === 'ruleOutput'
+                ? OUTPUT_NODES[t.data.kind]?.label
+                : TRANSFORMS[t.data.transformId]?.label),
+          },
+        }))
       txIdRef.current = Math.max(
         0,
         ...txNodes.map((t) => Number(/^tx-(\d+)$/.exec(t.id)?.[1]) || 0),
+      )
+      outIdRef.current = Math.max(
+        0,
+        ...txNodes.map((t) => Number(/^out-(\d+)$/.exec(t.id)?.[1]) || 0),
+      )
+      inIdRef.current = Math.max(
+        0,
+        ...txNodes.map((t) => Number(/^in-(\d+)$/.exec(t.id)?.[1]) || 0),
       )
       setNodes([...nodes, ...txNodes])
       setEdges(
@@ -446,7 +614,7 @@ function Canvas({ jsonData, outputData, sig }) {
     if (pendingSource) rows['json-root'].add(pendingSource)
     if (!sel) return { rows, tNodes, edgeIds }
 
-    rows[sel.nodeId]?.add(sel.rowId)
+    ;(rows[sel.nodeId] ??= new Set()).add(sel.rowId)
     const traverse = (startEdges, forward) => {
       let frontier = startEdges
       for (let i = 0; i < 12 && frontier.length; i++) {
@@ -470,8 +638,18 @@ function Canvas({ jsonData, outputData, sig }) {
       traverse(edges.filter((e) => e.target === 'fields' && e.targetHandle === `t-${sel.rowId}`), false)
     } else {
       tNodes.add(sel.nodeId)
-      traverse(edges.filter((e) => e.source === sel.nodeId), true)
-      traverse(edges.filter((e) => e.target === sel.nodeId), false)
+      if (sel.rowId) {
+        traverse(
+          edges.filter(
+            (e) => e.target === sel.nodeId && e.targetHandle === `t-${sel.rowId}`,
+          ),
+          false,
+        )
+        traverse(edges.filter((e) => e.source === sel.nodeId), true)
+      } else {
+        traverse(edges.filter((e) => e.source === sel.nodeId), true)
+        traverse(edges.filter((e) => e.target === sel.nodeId), false)
+      }
     }
     return { rows, tNodes, edgeIds }
   }, [sel, pendingSource, edges])
@@ -505,13 +683,15 @@ function Canvas({ jsonData, outputData, sig }) {
     })
   }, [edges, sel, pendingSource, dropEdgeId, highlighted, collapsed])
 
+  const nodeSig = nodes.map((n) => `${n.id}:${n.type}`).join('|')
+
   useEffect(() => {
     const inputObj = jsonData?.value
     setNodes((ns) => {
       const tNodeMap = Object.fromEntries(
-        ns.filter((n) => n.type === 'transform').map((n) => [n.id, n]),
+        ns.filter((n) => n.type !== 'jsonNode').map((n) => [n.id, n]),
       )
-      const resolver = makeResolver(edges, inputObj, tNodeMap, nodeParams)
+      const resolver = makeResolver(edges, inputObj, tNodeMap, nodeParams, outputData)
       return ns.map((n) => {
         const data = {
           ...n.data,
@@ -548,10 +728,31 @@ function Canvas({ jsonData, outputData, sig }) {
               : def.apply(resolver.edgeVal(ins[0], 0), nodeParams[n.id])
           data.preview = out == null ? null : String(out)
         }
+        if (n.type === 'ruleOutput') {
+          const def = OUTPUT_NODES[n.data.kind]
+          data.params = nodeParams[n.id] ?? {}
+          data.wired = new Set(
+            edges.filter((e) => e.target === n.id).map((e) => e.targetHandle?.slice(2)),
+          )
+          const fv = {}
+          for (const f of def?.fields ?? []) {
+            const v = resolver.at(n.id, `t-${f.key}`)
+            fv[f.key] = v === undefined ? (data.params[f.key] ?? f.default) : v
+          }
+          data.fieldValues = fv
+          data.assembled = Object.fromEntries((def?.fields ?? []).map((f) => [f.key, fv[f.key]]))
+        }
+        if (n.type === 'stringInput') {
+          const def = INPUT_NODES[n.data.kind] ?? INPUT_NODES.string_field
+          data.params = nodeParams[n.id] ?? {}
+          const inEdge = edges.find((e) => e.target === n.id)
+          data.wired = !!inEdge
+          data.wiredValue = inEdge ? def.coerce(resolver.edgeVal(inEdge, 0)) : undefined
+        }
         return { ...n, data }
       })
     })
-  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, jsonData, edges, makeResolver])
+  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, jsonData, outputData, edges, makeResolver, nodeSig])
 
   useEffect(() => {
     if (!nodes.length) return
@@ -562,11 +763,12 @@ function Canvas({ jsonData, outputData, sig }) {
           v: 1,
           sig,
           transforms: nodes
-            .filter((n) => n.type === 'transform')
+            .filter((n) => n.type !== 'jsonNode')
             .map((n) => ({
               id: n.id,
+              type: n.type,
               position: n.position,
-              data: { label: n.data.label, transformId: n.data.transformId },
+              data: { label: n.data.label, transformId: n.data.transformId, kind: n.data.kind },
             })),
           edges: edges.map(
             ({ id, source, sourceHandle, target, targetHandle, selected }) => ({
@@ -964,6 +1166,136 @@ function App() {
             </AccordionDetails>
           </Accordion>
 
+          <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
+              <Typography variant="subtitle2">Output nodes</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Drag an output node onto the canvas — wire the OUTPUT JSON node&apos;s
+                header connector to its field_mappings input.
+              </Typography>
+              <Stack spacing={1}>
+              {OUTPUT_NODE_LIST.map((o) => (
+                <Paper
+                  key={o.id}
+                  variant="outlined"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/x-output-node', o.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                  }}
+                  sx={{
+                    p: 1,
+                    cursor: 'grab',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    '&:active': { cursor: 'grabbing' },
+                  }}
+                >
+                  <DataObjectIcon fontSize="small" sx={{ color: '#66d19e' }} />
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {o.label}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {o.description}
+                    </Typography>
+                  </Box>
+                </Paper>
+              ))}
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
+              <Typography variant="subtitle2">Input nodes</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Drag an input node onto the canvas — its right connector feeds other nodes.
+              </Typography>
+              <Stack spacing={1}>
+              {INPUT_NODE_LIST.map((o) => {
+                const Icon = INPUT_TYPE_ICONS[o.type] ?? AbcIcon
+                return (
+                <Paper
+                  key={o.id}
+                  variant="outlined"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/x-input-node', o.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                  }}
+                  sx={{
+                    p: 1,
+                    cursor: 'grab',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    '&:active': { cursor: 'grabbing' },
+                  }}
+                >
+                  <Icon fontSize="small" sx={{ color: '#5eb4ff' }} />
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {o.label}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {o.description}
+                    </Typography>
+                  </Box>
+                </Paper>
+                )
+              })}
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
+              <Typography variant="subtitle2">Debug nodes</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Drag a debug node onto the canvas — its left connector takes any node output.
+              </Typography>
+              <Stack spacing={1}>
+              {DEBUG_NODE_LIST.map((o) => (
+                <Paper
+                  key={o.id}
+                  variant="outlined"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/x-output-node', o.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                  }}
+                  sx={{
+                    p: 1,
+                    cursor: 'grab',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    '&:active': { cursor: 'grabbing' },
+                  }}
+                >
+                  <BugReportIcon fontSize="small" sx={{ color: '#ffa726' }} />
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {o.label}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {o.description}
+                    </Typography>
+                  </Box>
+                </Paper>
+              ))}
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
+
           <Accordion
             disableGutters
             elevation={0}
@@ -988,7 +1320,7 @@ function App() {
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
                 Map fields: click a property on the left node, then click a field on the right — or
                 drag between the dot handles. Select an edge and press ⌫ to delete; drag an edge end
-                to rewire it.
+                to rewire it. Select a node and press ⌘/Ctrl+D to duplicate it.
               </Typography>
             </AccordionDetails>
           </Accordion>

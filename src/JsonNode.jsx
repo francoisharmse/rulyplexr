@@ -3,7 +3,7 @@ import { Box, Chip, IconButton, Typography } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
 
-const TYPE_COLORS = {
+export const TYPE_COLORS = {
   string: '#66d19e',
   number: '#5eb4ff',
   boolean: '#ffb35e',
@@ -74,13 +74,14 @@ function JsonNode({ data }) {
         width: 360,
         bgcolor: 'background.paper',
         border: '1px solid',
-        borderColor: 'divider',
+        borderColor: data.highlighted ? '#e6e2ff' : 'primary.main',
+        boxShadow: data.highlighted ? '0 0 0 1.5px #e6e2ff' : 6,
         borderRadius: '4px',
-        boxShadow: 6,
       }}
     >
       <Box
         sx={{
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -110,6 +111,15 @@ function JsonNode({ data }) {
           label={`${rootType} · ${entries.length} ${entries.length === 1 ? 'prop' : 'props'}`}
           sx={{ bgcolor: 'rgba(0,0,0,0.25)', color: 'inherit', height: 20 }}
         />
+        {data.rootHandle && (
+          <Handle
+            type="source"
+            position={Position.Right}
+            id="s-root"
+            className="rf-multi"
+            style={{ right: -4 }}
+          />
+        )}
       </Box>
 
       <Box>
@@ -168,7 +178,7 @@ function JsonNode({ data }) {
               </Box>
               <Typography
                 variant="body2"
-                sx={{ fontFamily: 'monospace', fontWeight: 600, minWidth: 90, flexShrink: 0 }}
+                sx={{ fontFamily: 'monospace', fontWeight: 600, minWidth: 0 }}
                 noWrap
                 title={row.id}
               >
@@ -200,7 +210,7 @@ function JsonNode({ data }) {
                   variant="caption"
                   color="text.secondary"
                   noWrap
-                  sx={{ fontFamily: 'monospace', ml: 'auto', maxWidth: 150 }}
+                  sx={{ fontFamily: 'monospace', ml: 'auto', maxWidth: 150, minWidth: 0 }}
                   title={preview(row.value)}
                 >
                   {preview(row.value)}
@@ -210,7 +220,7 @@ function JsonNode({ data }) {
                   <Typography
                     variant="caption"
                     noWrap
-                    sx={{ fontFamily: 'monospace', ml: 'auto', maxWidth: 150, color: '#66d19e' }}
+                    sx={{ fontFamily: 'monospace', ml: 'auto', maxWidth: 150, minWidth: 0, color: '#66d19e' }}
                     title={String(computed)}
                   >
                     {String(computed)}
