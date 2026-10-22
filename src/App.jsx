@@ -42,6 +42,23 @@ import TRANSFORMS, { TRANSFORM_LIST } from './transforms/index.js'
 
 const nodeTypes = { jsonNode: JsonNode, transform: TransformNode }
 
+const TEXT_KEY = 'json-node-texts-v1'
+const GRAPH_KEY = 'json-node-graph-v1'
+
+const hashStr = (s) => {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0
+  return h.toString(36)
+}
+
+const loadSavedGraph = (sig) => {
+  try {
+    const g = JSON.parse(localStorage.getItem(GRAPH_KEY))
+    if (g?.v === 1 && g.sig === sig) return g
+  } catch {}
+  return null
+}
+
 function collectSources(node, path = '') {
   const out = []
   if (node !== null && typeof node === 'object') {
@@ -58,23 +75,44 @@ const EDGE_DIM_STYLE = { stroke: '#9d92ff', strokeWidth: 1.5, opacity: 0.2 }
 const EDGE_SELECTED_STYLE = { stroke: '#ffffff', strokeWidth: 3.5 }
 const EDGE_DROP_STYLE = { stroke: '#ffffff', strokeWidth: 3 }
 
-function Canvas({ jsonData, outputData }) {
+function Canvas({ jsonData, outputData, sig }) {
+  const restoredRef = useRef()
+  const lastBuildRef = useRef(null)
+  if (restoredRef.current === undefined) restoredRef.current = loadSavedGraph(sig)
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [pendingSource, setPendingSource] = useState(null)
   const [sel, setSel] = useState(null)
   const [dropEdgeId, setDropEdgeId] = useState(null)
+  const [collapsed, setCollapsed] = useState({})
+  const [nodeParams, setNodeParams] = useState({})
   const txIdRef = useRef(0)
-  const { fitView, screenToFlowPosition } = useReactFlow()
+  const { fitView, screenToFlowPosition, getNode } = useReactFlow()
+
+  const isMultiTarget = useCallback(
+    (nodeId) => {
+      const n = getNode(nodeId)
+      return n?.type === 'transform' && !!TRANSFORMS[n.data.transformId]?.multiInput
+    },
+    [getNode],
+  )
+
+  const setParam = useCallback(
+    (nodeId, key, val) =>
+      setNodeParams((p) => ({ ...p, [nodeId]: { ...(p[nodeId] ?? {}), [key]: val } })),
+    [],
+  )
 
   const upsertEdge = useCallback(
     (conn, eds) => {
-      const filtered = eds.filter(
-        (e) => !(e.target === conn.target && e.targetHandle === conn.targetHandle),
-      )
+      const filtered = isMultiTarget(conn.target)
+        ? eds
+        : eds.filter(
+            (e) => !(e.target === conn.target && e.targetHandle === conn.targetHandle),
+          )
       return addEdge({ ...conn, style: EDGE_STYLE }, filtered)
     },
-    [],
+    [isMultiTarget],
   )
 
   const onConnect = useCallback(
@@ -84,14 +122,16 @@ function Canvas({ jsonData, outputData }) {
 
   const onReconnect = useCallback(
     (oldEdge, conn) =>
-      setEdges((eds) =>
-        reconnectEdge(oldEdge, conn, eds, { shouldReplaceId: true }).filter(
+      setEdges((eds) => {
+        const multi = isMultiTarget(conn.target)
+        return reconnectEdge(oldEdge, conn, eds, { shouldReplaceId: true }).filter(
           (e) =>
+            multi ||
             e.id === oldEdge.id ||
             !(e.target === conn.target && e.targetHandle === conn.targetHandle),
-        ),
-      ),
-    [setEdges],
+        )
+      }),
+    [setEdges, isMultiTarget],
   )
 
   const handleRowClick = useCallback(
@@ -125,30 +165,77 @@ function Canvas({ jsonData, outputData }) {
     [pendingSource, setEdges, upsertEdge],
   )
 
+  const toggleCollapsed = useCallback((nodeId, rowId) => {
+    setCollapsed((c) => {
+      const s = new Set(c[nodeId] ?? [])
+      if (s.has(rowId)) s.delete(rowId)
+      else s.add(rowId)
+      return { ...c, [nodeId]: s }
+    })
+  }, [])
+
   const onPaneClick = useCallback(() => {
     setPendingSource(null)
     setSel(null)
   }, [])
 
-  const onNodeClick = useCallback((_, node) => {
-    if (node.type === 'transform') setSel({ nodeId: node.id })
-  }, [])
-
-  const resolveValue = useCallback((target, targetHandle, eds, inputObj, tNodes) => {
-    const transforms = []
-    let cur = eds.find((e) => e.target === target && e.targetHandle === targetHandle)
-    for (let i = 0; i < 12 && cur; i++) {
-      if (cur.source === 'json-root') {
-        let val = inputObj?.[cur.sourceHandle?.slice(2)]
-        for (let j = transforms.length - 1; j >= 0; j--) val = transforms[j](val)
-        return val
+  const onNodeClick = useCallback(
+    (_, node) => {
+      if (
+        pendingSource &&
+        node.type === 'transform' &&
+        TRANSFORMS[node.data.transformId]?.multiInput
+      ) {
+        setEdges((eds) =>
+          upsertEdge(
+            {
+              id: `e-${pendingSource}-${node.id}`,
+              source: 'json-root',
+              sourceHandle: `s-${pendingSource}`,
+              target: node.id,
+              targetHandle: 'in',
+            },
+            eds,
+          ),
+        )
+        setPendingSource(null)
+        return
       }
-      const tn = tNodes[cur.source]
+      if (node.type === 'transform') setSel({ nodeId: node.id })
+    },
+    [pendingSource, setEdges, upsertEdge],
+  )
+
+  const makeResolver = useCallback((eds, inputObj, tNodes, paramsMap) => {
+    const edgeVal = (e, depth) => {
+      if (!e || depth > 12) return undefined
+      if (e.source === 'json-root') {
+        return e.sourceHandle
+          ?.slice(2)
+          .split('.')
+          .reduce((o, k) => (o == null ? o : o[k]), inputObj)
+      }
+      const tn = tNodes[e.source]
       if (!tn) return undefined
-      transforms.push(TRANSFORMS[tn.data.transformId]?.apply ?? ((v) => v))
-      cur = eds.find((e) => e.target === cur.source)
+      const def = TRANSFORMS[tn.data.transformId]
+      if (!def) return undefined
+      const ins = eds.filter((x) => x.target === tn.id)
+      if (def.multiInput) {
+        return def.apply(
+          ins.map((x) => edgeVal(x, depth + 1)),
+          paramsMap[tn.id],
+        )
+      }
+      return def.apply(edgeVal(ins[0], depth + 1), paramsMap[tn.id])
     }
-    return undefined
+    return {
+      edgeVal,
+      at: (target, targetHandle) =>
+        edgeVal(
+          eds.find((e) => e.target === target && e.targetHandle === targetHandle),
+          0,
+        ),
+    }
   }, [])
 
   const insertTransform = useCallback(
@@ -165,6 +252,12 @@ function Canvas({ jsonData, outputData }) {
           data: { label: t.label, transformId: type },
         },
       ])
+      if (t.params?.length) {
+        setNodeParams((p) => ({
+          ...p,
+          [tId]: Object.fromEntries(t.params.map((x) => [x.key, x.default ?? ''])),
+        }))
+      }
       if (edge) {
         setEdges((eds) => [
           ...eds.filter((e) => e.id !== edge.id),
@@ -196,24 +289,31 @@ function Canvas({ jsonData, outputData }) {
       setEdges((eds) => {
         let next = eds
         for (const n of dNodes.filter((n) => n.type === 'transform')) {
-          const inE = next.find((e) => e.target === n.id)
-          const outE = next.find((e) => e.source === n.id)
-          next = next.filter((e) => e !== inE && e !== outE)
-          if (inE && outE) {
-            next = addEdge(
-              {
-                id: `e-${inE.sourceHandle?.slice(2)}-${outE.targetHandle?.slice(2)}`,
-                source: inE.source,
-                sourceHandle: inE.sourceHandle,
-                target: outE.target,
-                targetHandle: outE.targetHandle,
-                style: EDGE_STYLE,
-              },
-              next,
-            )
+          const inEs = next.filter((e) => e.target === n.id)
+          const outEs = next.filter((e) => e.source === n.id)
+          next = next.filter((e) => !inEs.includes(e) && !outEs.includes(e))
+          if (inEs.length === 1) {
+            for (const outE of outEs) {
+              next = addEdge(
+                {
+                  id: `e-${inEs[0].sourceHandle?.slice(2)}-${outE.targetHandle?.slice(2)}`,
+                  source: inEs[0].source,
+                  sourceHandle: inEs[0].sourceHandle,
+                  target: outE.target,
+                  targetHandle: outE.targetHandle,
+                  style: EDGE_STYLE,
+                },
+                next,
+              )
+            }
           }
         }
         return next
+      })
+      setNodeParams((p) => {
+        const q = { ...p }
+        for (const n of dNodes) delete q[n.id]
+        return q
       })
       setNodes((ns) => ns.filter((n) => !dNodes.some((d) => d.id === n.id)))
       return false
@@ -255,12 +355,18 @@ function Canvas({ jsonData, outputData }) {
   }, [pendingSource, sel])
 
   useEffect(() => {
+    if (
+      lastBuildRef.current?.jsonData === jsonData &&
+      lastBuildRef.current?.outputData === outputData
+    )
+      return
+    lastBuildRef.current = { jsonData, outputData }
     const nodes = [
       {
         id: 'fields',
         type: 'jsonNode',
         position: { x: 620, y: 60 },
-        data: { name: 'output', value: outputData ?? {} },
+        data: { name: 'OUTPUT JSON', value: outputData ?? {} },
       },
     ]
     const edges = []
@@ -269,7 +375,7 @@ function Canvas({ jsonData, outputData }) {
         id: 'json-root',
         type: 'jsonNode',
         position: { x: 60, y: 60 },
-        data: { name: jsonData.name, value: jsonData.value },
+        data: { name: 'INPUT JSON', subName: jsonData.name, value: jsonData.value },
       })
       const inputKeys = new Set(toEntries(jsonData.value).map(([k]) => k))
       for (const m of outputData ? collectSources(outputData) : []) {
@@ -286,10 +392,50 @@ function Canvas({ jsonData, outputData }) {
         }
       }
     }
-    setNodes(nodes)
+    const restored = restoredRef.current
+    restoredRef.current = null
+    if (restored) {
+      const posMap = restored.positions ?? {}
+      for (const n of nodes) if (posMap[n.id]) n.position = posMap[n.id]
+      const txNodes = (restored.transforms ?? [])
+        .map((t) => ({
+          id: t.id,
+          type: 'transform',
+          position: t.position,
+          data: {
+            label: t.data?.label ?? TRANSFORMS[t.data?.transformId]?.label,
+            transformId: t.data?.transformId,
+          },
+        }))
+        .filter((t) => TRANSFORMS[t.data.transformId])
+      txIdRef.current = Math.max(
+        0,
+        ...txNodes.map((t) => Number(/^tx-(\d+)$/.exec(t.id)?.[1]) || 0),
+      )
+      setNodes([...nodes, ...txNodes])
+      setEdges(
+        (restored.edges ?? [])
+          .filter((e) => e.id && e.source && e.target)
+          .map((e) => ({ ...e, style: EDGE_STYLE, reconnectable: true })),
+      )
+      setNodeParams(restored.nodeParams ?? {})
+      setCollapsed(
+        Object.fromEntries(
+          Object.entries(restored.collapsed ?? {}).map(([k, v]) => [k, new Set(v)]),
+        ),
+      )
+      setSel(restored.sel ?? null)
+      requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }))
+      return
+    }
+    setNodes((prev) => {
+      const pos = Object.fromEntries(prev.map((n) => [n.id, n.position]))
+      return nodes.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n))
+    })
     setEdges(edges)
     setPendingSource(null)
     setSel(null)
+    setCollapsed({})
     requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }))
   }, [jsonData, outputData, setNodes, setEdges, fitView])
 
@@ -331,19 +477,33 @@ function Canvas({ jsonData, outputData }) {
   }, [sel, pendingSource, edges])
 
   const displayEdges = useMemo(() => {
+    const remap = (handle, nodeId, prefix) => {
+      if (!handle?.startsWith(prefix)) return handle
+      const segs = handle.slice(2).split('.')
+      for (let i = 1; i < segs.length; i++) {
+        const anc = segs.slice(0, i).join('.')
+        if (collapsed[nodeId]?.has(anc)) return `${prefix}${anc}`
+      }
+      return handle
+    }
     const inactive = !sel && !pendingSource && !dropEdgeId
     return edges.map((e) => {
-      if (dropEdgeId) {
-        return e.id === dropEdgeId
-          ? { ...e, style: EDGE_DROP_STYLE, animated: true }
-          : { ...e, style: EDGE_DIM_STYLE }
+      const base = {
+        ...e,
+        sourceHandle: remap(e.sourceHandle, e.source, 's-'),
+        targetHandle: remap(e.targetHandle, e.target, 't-'),
       }
-      if (e.selected) return { ...e, style: EDGE_SELECTED_STYLE, animated: true }
-      if (inactive) return e
+      if (dropEdgeId) {
+        return base.id === dropEdgeId
+          ? { ...base, style: EDGE_DROP_STYLE, animated: true }
+          : { ...base, style: EDGE_DIM_STYLE }
+      }
+      if (e.selected) return { ...base, style: EDGE_SELECTED_STYLE, animated: true }
+      if (inactive) return base
       const linked = highlighted.edgeIds.has(e.id)
-      return { ...e, style: linked ? EDGE_HI_STYLE : sel || pendingSource ? EDGE_DIM_STYLE : EDGE_STYLE }
+      return { ...base, style: linked ? EDGE_HI_STYLE : sel || pendingSource ? EDGE_DIM_STYLE : EDGE_STYLE }
     })
-  }, [edges, sel, pendingSource, dropEdgeId, highlighted])
+  }, [edges, sel, pendingSource, dropEdgeId, highlighted, collapsed])
 
   useEffect(() => {
     const inputObj = jsonData?.value
@@ -351,10 +511,14 @@ function Canvas({ jsonData, outputData }) {
       const tNodeMap = Object.fromEntries(
         ns.filter((n) => n.type === 'transform').map((n) => [n.id, n]),
       )
+      const resolver = makeResolver(edges, inputObj, tNodeMap, nodeParams)
       return ns.map((n) => {
         const data = {
           ...n.data,
           onRowClick: (rowId) => handleRowClick(n.id, rowId),
+          onToggle: (rowId) => toggleCollapsed(n.id, rowId),
+          onParamChange: (key, val) => setParam(n.id, key, val),
+          collapsedIds: collapsed[n.id],
           selectedIds: [...(highlighted.rows[n.id] ?? [])],
           highlighted: highlighted.tNodes.has(n.id),
         }
@@ -362,21 +526,72 @@ function Canvas({ jsonData, outputData }) {
           const values = {}
           for (const e of edges) {
             if (e.target === 'fields' && e.targetHandle) {
-              const v = resolveValue('fields', e.targetHandle, edges, inputObj, tNodeMap)
+              const v = resolver.at('fields', e.targetHandle)
               if (v !== undefined) values[e.targetHandle.slice(2)] = v
             }
           }
           data.values = values
         }
         if (n.type === 'transform') {
-          const v = resolveValue(n.id, 'in', edges, inputObj, tNodeMap)
-          const out = v === undefined ? undefined : TRANSFORMS[n.data.transformId]?.apply(v)
+          const def = TRANSFORMS[n.data.transformId]
+          data.params =
+            nodeParams[n.id] ??
+            Object.fromEntries((def?.params ?? []).map((p) => [p.key, p.default ?? '']))
+          const ins = edges.filter((e) => e.target === n.id)
+          const out = !def || !ins.length
+            ? undefined
+            : def.multiInput
+              ? def.apply(
+                  ins.map((x) => resolver.edgeVal(x, 0)),
+                  nodeParams[n.id],
+                )
+              : def.apply(resolver.edgeVal(ins[0], 0), nodeParams[n.id])
           data.preview = out == null ? null : String(out)
         }
         return { ...n, data }
       })
     })
-  }, [highlighted, handleRowClick, setNodes, jsonData, edges, resolveValue])
+  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, jsonData, edges, makeResolver])
+
+  useEffect(() => {
+    if (!nodes.length) return
+    try {
+      localStorage.setItem(
+        GRAPH_KEY,
+        JSON.stringify({
+          v: 1,
+          sig,
+          transforms: nodes
+            .filter((n) => n.type === 'transform')
+            .map((n) => ({
+              id: n.id,
+              position: n.position,
+              data: { label: n.data.label, transformId: n.data.transformId },
+            })),
+          edges: edges.map(
+            ({ id, source, sourceHandle, target, targetHandle, selected }) => ({
+              id,
+              source,
+              sourceHandle,
+              target,
+              targetHandle,
+              selected,
+            }),
+          ),
+          sel,
+          positions: Object.fromEntries(
+            nodes
+              .filter((n) => n.id === 'json-root' || n.id === 'fields')
+              .map((n) => [n.id, n.position]),
+          ),
+          nodeParams,
+          collapsed: Object.fromEntries(
+            Object.entries(collapsed).map(([k, s]) => [k, [...s]]),
+          ),
+        }),
+      )
+    } catch {}
+  }, [nodes, edges, nodeParams, collapsed, sel, sig])
 
   return (
     <Box
@@ -440,24 +655,38 @@ function Diagnostic({ item }) {
   )
 }
 
-const SAMPLE_INPUT = validateJson(sampleInputText)
-const SAMPLE_OUTPUT = validateJson(sampleOutputText)
+const loadSavedTexts = () => {
+  const fallback = { jsonText: sampleInputText, outputText: sampleOutputText, name: 'sample.json' }
+  try {
+    return { ...fallback, ...(JSON.parse(localStorage.getItem(TEXT_KEY)) ?? {}) }
+  } catch {
+    return fallback
+  }
+}
 
 const ACCORDION_SX = { bgcolor: 'transparent', '&::before': { display: 'none' } }
 const ACCORDION_SUMMARY_SX = { px: 0, minHeight: 40, '& .MuiAccordionSummary-content': { my: 0.5 } }
 const MONO_TEXTFIELD_SX = { '& textarea': { fontFamily: 'monospace', fontSize: 12 } }
 
 function App() {
-  const [jsonText, setJsonText] = useState(sampleInputText)
+  const [initial] = useState(() => {
+    const texts = loadSavedTexts()
+    return {
+      texts,
+      input: validateJson(texts.jsonText),
+      output: validateJson(texts.outputText),
+    }
+  })
+  const [jsonText, setJsonText] = useState(initial.texts.jsonText)
   const [jsonData, setJsonData] = useState(() =>
-    SAMPLE_INPUT.ok ? { name: 'sample.json', value: SAMPLE_INPUT.value } : null,
+    initial.input.ok ? { name: initial.texts.name, value: initial.input.value } : null,
   )
-  const [validation, setValidation] = useState(() => SAMPLE_INPUT)
-  const [outputText, setOutputText] = useState(sampleOutputText)
+  const [validation, setValidation] = useState(initial.input)
+  const [outputText, setOutputText] = useState(initial.texts.outputText)
   const [outputData, setOutputData] = useState(() =>
-    SAMPLE_OUTPUT.ok ? SAMPLE_OUTPUT.value : null,
+    initial.output.ok ? initial.output.value : null,
   )
-  const [outputValidation, setOutputValidation] = useState(() => SAMPLE_OUTPUT)
+  const [outputValidation, setOutputValidation] = useState(initial.output)
   const fileInputRef = useRef(null)
   const fileOutputRef = useRef(null)
 
@@ -524,6 +753,15 @@ function App() {
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
   }, [renderJson])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        TEXT_KEY,
+        JSON.stringify({ jsonText, outputText, name: jsonData?.name ?? 'JSON' }),
+      )
+    } catch {}
+  }, [jsonText, outputText, jsonData])
 
   const propCount = jsonData ? toEntries(jsonData.value).length : 0
 
@@ -758,7 +996,15 @@ function App() {
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <ReactFlowProvider>
-            <Canvas jsonData={jsonData} outputData={outputData} />
+            <Canvas
+              jsonData={jsonData}
+              outputData={outputData}
+              sig={hashStr(
+                JSON.stringify(jsonData?.value ?? null) +
+                  '' +
+                  JSON.stringify(outputData ?? null),
+              )}
+            />
           </ReactFlowProvider>
         </Box>
       </Box>

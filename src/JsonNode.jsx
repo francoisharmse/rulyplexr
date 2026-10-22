@@ -1,5 +1,7 @@
 import { Handle, Position } from '@xyflow/react'
-import { Box, Chip, Typography } from '@mui/material'
+import { Box, Chip, IconButton, Typography } from '@mui/material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
 
 const TYPE_COLORS = {
   string: '#66d19e',
@@ -30,7 +32,21 @@ export function toEntries(value) {
 const isField = (v) =>
   v !== null && !Array.isArray(v) && typeof v === 'object' && typeof v.type === 'string'
 
-export function toRows(value, maxDepth = 1) {
+const MAX_DEPTH = 1
+const EMPTY_SET = new Set()
+
+const isExpandableValue = (v) =>
+  v !== null && typeof v === 'object' && !isField(v) && toEntries(v).length > 0
+
+const isHiddenByCollapse = (id, collapsed) => {
+  const segs = id.split('.')
+  for (let i = 1; i < segs.length; i++) {
+    if (collapsed.has(segs.slice(0, i).join('.'))) return true
+  }
+  return false
+}
+
+export function toRows(value, maxDepth = MAX_DEPTH) {
   const rows = []
   const walk = (v, id, key, depth) => {
     rows.push({ id, key, value: v, depth })
@@ -46,6 +62,10 @@ function JsonNode({ data }) {
   const { name, value } = data
   const entries = toEntries(value)
   const rows = toRows(value)
+  const collapsed = data.collapsedIds ?? EMPTY_SET
+  const visibleRows = collapsed.size
+    ? rows.filter((r) => !isHiddenByCollapse(r.id, collapsed))
+    : rows
   const rootType = typeOf(value)
 
   return (
@@ -74,6 +94,16 @@ function JsonNode({ data }) {
       >
         <Typography variant="subtitle2" noWrap sx={{ fontWeight: 700 }}>
           {name}
+          {data.subName && (
+            <Typography
+              component="span"
+              variant="caption"
+              noWrap
+              sx={{ ml: 0.75, opacity: 0.75, fontWeight: 400 }}
+            >
+              {data.subName}
+            </Typography>
+          )}
         </Typography>
         <Chip
           size="small"
@@ -83,10 +113,12 @@ function JsonNode({ data }) {
       </Box>
 
       <Box>
-        {rows.map((row) => {
+        {visibleRows.map((row) => {
           const fieldType = isField(row.value) ? row.value.type : null
           const t = fieldType ?? typeOf(row.value)
           const computed = data.values?.[row.id]
+          const expandable = row.depth < MAX_DEPTH && isExpandableValue(row.value)
+          const isCollapsed = collapsed.has(row.id)
           return (
             <Box
               key={row.id}
@@ -115,6 +147,25 @@ function JsonNode({ data }) {
                 className="rf-single"
                 style={{ left: -4 }}
               />
+              <Box sx={{ width: 18, flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                {expandable && (
+                  <IconButton
+                    size="small"
+                    className="nodrag"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      data.onToggle?.(row.id)
+                    }}
+                    sx={{ p: 0, width: 18, height: 18, color: 'text.secondary' }}
+                  >
+                    {isCollapsed ? (
+                      <KeyboardArrowRightIcon sx={{ fontSize: 16 }} />
+                    ) : (
+                      <ExpandMoreIcon sx={{ fontSize: 16 }} />
+                    )}
+                  </IconButton>
+                )}
+              </Box>
               <Typography
                 variant="body2"
                 sx={{ fontFamily: 'monospace', fontWeight: 600, minWidth: 90, flexShrink: 0 }}
@@ -122,6 +173,15 @@ function JsonNode({ data }) {
                 title={row.id}
               >
                 {row.key}
+                {isCollapsed && (
+                  <Typography
+                    component="span"
+                    variant="caption"
+                    sx={{ fontFamily: 'monospace', color: 'text.disabled', ml: 0.75 }}
+                  >
+                    +{toEntries(row.value).length}
+                  </Typography>
+                )}
               </Typography>
               <Chip
                 size="small"
