@@ -2,6 +2,8 @@ import { Handle, NodeResizeControl, Position } from '@xyflow/react'
 import { Box, Chip, IconButton, Typography } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
+import ContentPasteIcon from '@mui/icons-material/ContentPaste'
+import UploadFileIcon from '@mui/icons-material/UploadFile'
 
 export const TYPE_COLORS = {
   string: '#66d19e',
@@ -117,11 +119,41 @@ function JsonNode({ data, selected }) {
             </Typography>
           )}
         </Typography>
-        <Chip
-          size="small"
-          label={`${rootType} · ${entries.length} ${entries.length === 1 ? 'prop' : 'props'}`}
-          sx={{ bgcolor: 'rgba(0,0,0,0.25)', color: 'inherit', height: 20 }}
-        />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+          {data.onPasteJson && (
+            <IconButton
+              size="small"
+              className="nodrag"
+              title="Paste JSON"
+              onClick={(e) => {
+                e.stopPropagation()
+                data.onPasteJson?.()
+              }}
+              sx={{ color: 'inherit', p: 0.25 }}
+            >
+              <ContentPasteIcon sx={{ fontSize: 14 }} />
+            </IconButton>
+          )}
+          {data.onBrowse && (
+            <IconButton
+              size="small"
+              className="nodrag"
+              title="Browse for a JSON file"
+              onClick={(e) => {
+                e.stopPropagation()
+                data.onBrowse?.()
+              }}
+              sx={{ color: 'inherit', p: 0.25 }}
+            >
+              <UploadFileIcon sx={{ fontSize: 15 }} />
+            </IconButton>
+          )}
+          <Chip
+            size="small"
+            label={`${rootType} · ${entries.length} ${entries.length === 1 ? 'prop' : 'props'}`}
+            sx={{ bgcolor: 'rgba(0,0,0,0.25)', color: 'inherit', height: 20 }}
+          />
+        </Box>
         {data.rootHandle && (
           <Handle
             type="source"

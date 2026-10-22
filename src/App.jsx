@@ -21,6 +21,10 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   Paper,
   Stack,
@@ -99,7 +103,7 @@ const EDGE_DIM_STYLE = { stroke: '#9d92ff', strokeWidth: 1.5, opacity: 0.2 }
 const EDGE_SELECTED_STYLE = { stroke: '#ffffff', strokeWidth: 3.5 }
 const EDGE_DROP_STYLE = { stroke: '#ffffff', strokeWidth: 3 }
 
-function Canvas({ jsonData, outputData, sig }) {
+function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput }) {
   const restoredRef = useRef()
   const lastBuildRef = useRef(null)
   if (restoredRef.current === undefined) restoredRef.current = loadSavedGraph(sig)
@@ -720,6 +724,10 @@ function Canvas({ jsonData, outputData, sig }) {
           collapsedIds: collapsed[n.id],
           selectedIds: [...(highlighted.rows[n.id] ?? [])],
           highlighted: highlighted.tNodes.has(n.id),
+          onBrowse:
+            n.id === 'json-root' ? onBrowseFile : n.id === 'fields' ? onBrowseOutput : undefined,
+          onPasteJson:
+            n.id === 'json-root' ? onPasteJson : n.id === 'fields' ? onPasteOutput : undefined,
         }
         if (n.id === 'fields') {
           const values = {}
@@ -771,7 +779,7 @@ function Canvas({ jsonData, outputData, sig }) {
         return { ...n, data }
       })
     })
-  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, jsonData, outputData, edges, makeResolver, nodeSig])
+  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, jsonData, outputData, edges, makeResolver, nodeSig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput])
 
   useEffect(() => {
     if (!nodes.length) return
@@ -911,6 +919,7 @@ function App() {
   const [outputValidation, setOutputValidation] = useState(initial.output)
   const fileInputRef = useRef(null)
   const fileOutputRef = useRef(null)
+  const openInputPicker = useCallback(() => fileInputRef.current?.click(), [])
 
   const renderJson = useCallback(
     (text, name = 'JSON', outText = null) => {
@@ -923,6 +932,30 @@ function App() {
     },
     [outputText],
   )
+
+  const openOutputPicker = useCallback(() => fileOutputRef.current?.click(), [])
+  const [pasteState, setPasteState] = useState(null)
+  const [pasteText, setPasteText] = useState('')
+  const onPasteJson = useCallback(() => {
+    setPasteText(jsonText)
+    setPasteState('input')
+  }, [jsonText])
+  const onPasteOutput = useCallback(() => {
+    setPasteText(outputText)
+    setPasteState('output')
+  }, [outputText])
+  const submitPaste = useCallback(() => {
+    if (pasteState === 'output') {
+      setOutputText(pasteText)
+      const res = validateJson(pasteText)
+      setOutputValidation(res)
+      if (res.ok) setOutputData(res.value)
+    } else {
+      setJsonText(pasteText)
+      renderJson(pasteText)
+    }
+    setPasteState(null)
+  }, [pasteState, pasteText, renderJson])
 
   const handleFile = useCallback(
     (file) => {
@@ -1037,7 +1070,7 @@ function App() {
                 variant="outlined"
                 size="small"
                 startIcon={<UploadFileIcon />}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={openInputPicker}
                 sx={{ mt: 1 }}
               >
                 Browse…
@@ -1098,7 +1131,7 @@ function App() {
                 variant="outlined"
                 size="small"
                 startIcon={<UploadFileIcon />}
-                onClick={() => fileOutputRef.current?.click()}
+                onClick={openOutputPicker}
                 sx={{ mt: 1 }}
               >
                 Browse…
@@ -1347,10 +1380,39 @@ function App() {
         </Paper>
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Dialog open={pasteState !== null} onClose={() => setPasteState(null)} maxWidth="sm" fullWidth>
+            <DialogTitle>
+              {pasteState === 'output' ? 'Paste output structure JSON' : 'Paste JSON'}
+            </DialogTitle>
+            <DialogContent>
+              <TextField
+                multiline
+                fullWidth
+                autoFocus
+                minRows={12}
+                maxRows={20}
+                placeholder="Paste JSON here…"
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                spellCheck={false}
+                sx={MONO_TEXTFIELD_SX}
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setPasteState(null)}>Cancel</Button>
+              <Button variant="contained" onClick={submitPaste}>
+                Render node
+              </Button>
+            </DialogActions>
+          </Dialog>
           <ReactFlowProvider>
             <Canvas
               jsonData={jsonData}
               outputData={outputData}
+              onBrowseFile={openInputPicker}
+              onPasteJson={onPasteJson}
+              onBrowseOutput={openOutputPicker}
+              onPasteOutput={onPasteOutput}
               sig={hashStr(
                 JSON.stringify(jsonData?.value ?? null) +
                   '' +
