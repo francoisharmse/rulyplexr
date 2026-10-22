@@ -8,3 +8,14 @@ body,
 * {
   box-sizing: border-box;
 }
+
+/* xyflow connection handles — hollow "o" rings */
+.react-flow__handle {
+  width: 13px;
+  height: 13px;
+  min-width: 13px;
+  min-height: 13px;
+  background: transparent;
+  border: 2px solid #9d92ff;
+  border-radius: 50%;
+}

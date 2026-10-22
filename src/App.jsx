@@ -38,18 +38,9 @@ import { validateJson } from './validateJson.js'
 import sampleInputText from '../sample_json.json?raw'
 import sampleOutputText from '../sample_output.json?raw'
 
-const nodeTypes = { jsonNode: JsonNode, transform: TransformNode }
+import TRANSFORMS, { TRANSFORM_LIST } from './transforms/index.js'
 
-const TRANSFORMS = {
-  unix_to_iso: {
-    label: 'Transform to ISO time',
-    description: 'Unix seconds → ISO 8601',
-    apply: (v) => {
-      const n = Number(v)
-      return Number.isFinite(n) ? new Date(n * 1000).toISOString() : null
-    },
-  },
-}
+const nodeTypes = { jsonNode: JsonNode, transform: TransformNode }
 
 function collectSources(node, path = '') {
   const out = []
@@ -700,13 +691,13 @@ function App() {
                 Drag a rule onto an edge to insert it between input and output.
               </Typography>
               <Stack spacing={1}>
-              {Object.entries(TRANSFORMS).map(([id, t]) => (
+              {TRANSFORM_LIST.map((t) => (
                 <Paper
-                  key={id}
+                  key={t.id}
                   variant="outlined"
                   draggable
                   onDragStart={(e) => {
-                    e.dataTransfer.setData('application/x-transform-node', id)
+                    e.dataTransfer.setData('application/x-transform-node', t.id)
                     e.dataTransfer.effectAllowed = 'move'
                   }}
                   sx={{

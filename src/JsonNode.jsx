@@ -56,7 +56,6 @@ function JsonNode({ data }) {
         border: '1px solid',
         borderColor: 'divider',
         borderRadius: '4px',
-        overflow: 'hidden',
         boxShadow: 6,
       }}
     >
@@ -68,6 +67,7 @@ function JsonNode({ data }) {
           gap: 1,
           px: 1.5,
           py: 1,
+          borderRadius: '3px 3px 0 0',
           bgcolor: 'primary.main',
           color: 'primary.contrastText',
         }}
@@ -108,7 +108,7 @@ function JsonNode({ data }) {
                 '&:hover': { bgcolor: 'action.hover' },
               }}
             >
-              <Handle type="target" position={Position.Left} id={`t-${row.id}`} style={{ left: 10 }} />
+              <Handle type="target" position={Position.Left} id={`t-${row.id}`} style={{ left: -4 }} />
               <Typography
                 variant="body2"
                 sx={{ fontFamily: 'monospace', fontWeight: 600, minWidth: 90, flexShrink: 0 }}
@@ -151,7 +151,7 @@ function JsonNode({ data }) {
                   </Typography>
                 )
               )}
-              <Handle type="source" position={Position.Right} id={`s-${row.id}`} style={{ right: 10 }} />
+              <Handle type="source" position={Position.Right} id={`s-${row.id}`} style={{ right: -4 }} />
             </Box>
           )
         })}
