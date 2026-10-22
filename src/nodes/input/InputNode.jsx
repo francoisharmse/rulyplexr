@@ -40,7 +40,12 @@ function InputNode({ data, selected }) {
           style={{ width: 8, transform: 'translate(-100%, 0)' }}
         />
       )}
-      <Handle type="target" position={Position.Left} id="in" className="rf-single" />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="in"
+        className={def.multiInput ? 'rf-multi' : 'rf-single'}
+      />
       <Box
         sx={{
           display: 'flex',

@@ -83,6 +83,7 @@ export const INPUT_NODES = {
     description: 'One field per item (any value) → array out',
     type: 'array',
     editor: ArrayFieldNode,
+    multiInput: true,
     defaultParams: { value: [''] },
     parse: (p) =>
       Array.isArray(p?.value) ? p.value.map(parseItem) : parseArrayText(p?.value),

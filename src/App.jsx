@@ -26,6 +26,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  InputAdornment,
   Paper,
   Stack,
   TextField,
@@ -42,6 +43,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import DataObjectIcon from '@mui/icons-material/DataObject'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import SearchIcon from '@mui/icons-material/Search'
 import JsonNode, { toEntries } from './nodes/input/JsonNode.jsx'
 import TransformNode from './nodes/transforms/TransformNode.jsx'
 import RuleOutputNode from './nodes/output/RuleOutputNode.jsx'
@@ -127,7 +129,9 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
   const isMultiTarget = useCallback(
     (nodeId) => {
       const n = getNode(nodeId)
-      return n?.type === 'transform' && !!TRANSFORMS[n.data.transformId]?.multiInput
+      if (n?.type === 'transform') return !!TRANSFORMS[n.data.transformId]?.multiInput
+      if (n?.type === 'stringInput') return !!INPUT_NODES[n.data?.kind]?.multiInput
+      return false
     },
     [getNode],
   )
@@ -783,9 +787,13 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         if (n.type === 'stringInput') {
           const def = INPUT_NODES[n.data.kind] ?? INPUT_NODES.string_field
           data.params = nodeParams[n.id] ?? {}
-          const inEdge = edges.find((e) => e.target === n.id)
-          data.wired = !!inEdge
-          data.wiredValue = inEdge ? def.coerce(resolver.edgeVal(inEdge, 0), nodeParams[n.id]) : undefined
+          const ins = edges.filter((e) => e.target === n.id)
+          data.wired = ins.length > 0
+          data.wiredValue = def.multiInput
+            ? ins.map((x) => resolver.edgeVal(x, 0))
+            : ins.length
+              ? def.coerce(resolver.edgeVal(ins[0], 0), nodeParams[n.id])
+              : undefined
         }
         return { ...n, data }
       })
@@ -833,6 +841,19 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
       )
     } catch {}
   }, [nodes, edges, nodeParams, collapsed, sel, sig])
+
+  // Migrate nodes created before debugNode was its own type
+  useEffect(() => {
+    setNodes((ns) =>
+      ns.some((n) => n.type === 'ruleOutput' && DEBUG_NODES[n.data?.kind])
+        ? ns.map((n) =>
+            n.type === 'ruleOutput' && DEBUG_NODES[n.data?.kind]
+              ? { ...n, type: 'debugNode' }
+              : n,
+          )
+        : ns,
+    )
+  }, [setNodes])
 
   return (
     <Box
@@ -945,6 +966,19 @@ function App() {
   )
 
   const openOutputPicker = useCallback(() => fileOutputRef.current?.click(), [])
+  const [paletteFilter, setPaletteFilter] = useState('')
+  const nodeMatches = useCallback(
+    (n) => {
+      const q = paletteFilter.trim().toLowerCase()
+      if (!q) return true
+      return (
+        n.label?.toLowerCase().includes(q) ||
+        n.description?.toLowerCase().includes(q) ||
+        n.id?.toLowerCase().includes(q)
+      )
+    },
+    [paletteFilter],
+  )
   const [pasteState, setPasteState] = useState(null)
   const [pasteText, setPasteText] = useState('')
   const onPasteJson = useCallback(() => {
@@ -1188,6 +1222,25 @@ function App() {
           </Stack>
 
           <Divider />
+          <TextField
+            size="small"
+            variant="outlined"
+            fullWidth
+            placeholder="Filter nodes…"
+            value={paletteFilter}
+            onChange={(e) => setPaletteFilter(e.target.value)}
+            slotProps={{
+              htmlInput: { style: { fontSize: 13, padding: '7px 8px' } },
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ fontSize: 18 }} />
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+          {(!!paletteFilter.trim() ? TRANSFORM_LIST.some(nodeMatches) : true) && (
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
               <Typography variant="subtitle2">Transformation nodes</Typography>
@@ -1197,7 +1250,7 @@ function App() {
                 Drag a rule onto an edge to insert it between input and output.
               </Typography>
               <Stack spacing={1}>
-              {TRANSFORM_LIST.map((t) => (
+              {TRANSFORM_LIST.filter(nodeMatches).map((t) => (
                 <Paper
                   key={t.id}
                   variant="outlined"
@@ -1229,7 +1282,9 @@ function App() {
               </Stack>
             </AccordionDetails>
           </Accordion>
+          )}
 
+          {(!!paletteFilter.trim() ? OUTPUT_NODE_LIST.some(nodeMatches) : true) && (
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
               <Typography variant="subtitle2">Output nodes</Typography>
@@ -1240,7 +1295,7 @@ function App() {
                 header connector to its field_mappings input.
               </Typography>
               <Stack spacing={1}>
-              {OUTPUT_NODE_LIST.map((o) => (
+              {OUTPUT_NODE_LIST.filter(nodeMatches).map((o) => (
                 <Paper
                   key={o.id}
                   variant="outlined"
@@ -1272,7 +1327,9 @@ function App() {
               </Stack>
             </AccordionDetails>
           </Accordion>
+          )}
 
+          {(!!paletteFilter.trim() ? INPUT_NODE_LIST.some(nodeMatches) : true) && (
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
               <Typography variant="subtitle2">Input nodes</Typography>
@@ -1282,7 +1339,7 @@ function App() {
                 Drag an input node onto the canvas — its right connector feeds other nodes.
               </Typography>
               <Stack spacing={1}>
-              {INPUT_NODE_LIST.map((o) => {
+              {INPUT_NODE_LIST.filter(nodeMatches).map((o) => {
                 const Icon = INPUT_TYPE_ICONS[o.type] ?? AbcIcon
                 return (
                 <Paper
@@ -1317,7 +1374,9 @@ function App() {
               </Stack>
             </AccordionDetails>
           </Accordion>
+          )}
 
+          {(!!paletteFilter.trim() ? DEBUG_NODE_LIST.some(nodeMatches) : true) && (
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
               <Typography variant="subtitle2">Debug nodes</Typography>
@@ -1327,7 +1386,7 @@ function App() {
                 Drag a debug node onto the canvas — its left connector takes any node output.
               </Typography>
               <Stack spacing={1}>
-              {DEBUG_NODE_LIST.map((o) => (
+              {DEBUG_NODE_LIST.filter(nodeMatches).map((o) => (
                 <Paper
                   key={o.id}
                   variant="outlined"
@@ -1359,6 +1418,7 @@ function App() {
               </Stack>
             </AccordionDetails>
           </Accordion>
+          )}
 
           <Accordion
             disableGutters
