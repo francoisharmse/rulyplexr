@@ -30,7 +30,6 @@ body,
 .react-flow__handle.rf-multi::after {
   content: '';
   position: absolute;
-  right: -8px;
   width: 4px;
   height: 4px;
   border-radius: 50%;
@@ -43,4 +42,14 @@ body,
 
 .react-flow__handle.rf-multi::after {
   bottom: -3px;
+}
+
+.react-flow__handle-right.rf-multi::before,
+.react-flow__handle-right.rf-multi::after {
+  right: -8px;
+}
+
+.react-flow__handle-left.rf-multi::before,
+.react-flow__handle-left.rf-multi::after {
+  left: -8px;
 }
