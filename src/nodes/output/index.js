@@ -9,16 +9,8 @@ export const OUTPUT_NODES = {
       { key: 'field_mappings', type: 'object', default: {} },
     ],
   },
-  debug_out: {
-    id: 'debug_out',
-    label: 'DEBUG Output',
-    description: 'Dumps the raw value of whatever feeds into it',
-    fields: [{ key: 'value', type: 'any', default: undefined }],
-    debug: true,
-  },
 }
 
-export const OUTPUT_NODE_LIST = Object.values(OUTPUT_NODES).filter((o) => !o.debug)
-export const DEBUG_NODE_LIST = Object.values(OUTPUT_NODES).filter((o) => o.debug)
+export const OUTPUT_NODE_LIST = Object.values(OUTPUT_NODES)
 
 export default OUTPUT_NODES

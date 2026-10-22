@@ -1,3 +1,8 @@
+import StringFieldNode from './StringFieldNode.jsx'
+import NumberFieldNode from './NumberFieldNode.jsx'
+import BooleanFieldNode from './BooleanFieldNode.jsx'
+import ArrayFieldNode from './ArrayFieldNode.jsx'
+
 const toOutString = (v) =>
   v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)
 
@@ -47,6 +52,7 @@ export const INPUT_NODES = {
     label: 'String field',
     description: 'Literal text or any input → raw string out',
     type: 'string',
+    editor: StringFieldNode,
     defaultParams: { value: '' },
     parse: (p) => p?.value ?? '',
     coerce: toOutString,
@@ -56,6 +62,7 @@ export const INPUT_NODES = {
     label: 'Number field',
     description: 'Numeric literal or any input → number out',
     type: 'number',
+    editor: NumberFieldNode,
     defaultParams: { value: '' },
     parse: (p) => toNumber(p?.value),
     coerce: toNumber,
@@ -65,6 +72,7 @@ export const INPUT_NODES = {
     label: 'Boolean field',
     description: 'Toggle or any input → true/false out',
     type: 'boolean',
+    editor: BooleanFieldNode,
     defaultParams: { value: false },
     parse: (p) => !!p?.value,
     coerce: toBoolean,
@@ -74,6 +82,7 @@ export const INPUT_NODES = {
     label: 'Array field',
     description: 'One field per item (any value) → array out',
     type: 'array',
+    editor: ArrayFieldNode,
     defaultParams: { value: [''] },
     parse: (p) =>
       Array.isArray(p?.value) ? p.value.map(parseItem) : parseArrayText(p?.value),

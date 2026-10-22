@@ -42,26 +42,31 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import DataObjectIcon from '@mui/icons-material/DataObject'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import JsonNode, { toEntries } from './JsonNode.jsx'
-import TransformNode from './TransformNode.jsx'
-import RuleOutputNode from './RuleOutputNode.jsx'
-import InputNode from './InputNode.jsx'
+import JsonNode, { toEntries } from './nodes/input/JsonNode.jsx'
+import TransformNode from './nodes/transforms/TransformNode.jsx'
+import RuleOutputNode from './nodes/output/RuleOutputNode.jsx'
+import DebugNode from './nodes/debug/DebugNode.jsx'
+import InputNode from './nodes/input/InputNode.jsx'
 import { validateJson } from './validateJson.js'
 import sampleInputText from '../sample_json.json?raw'
 import sampleOutputText from '../sample_output.json?raw'
 
-import TRANSFORMS, { TRANSFORM_LIST } from './transforms/index.js'
-import OUTPUT_NODES, { OUTPUT_NODE_LIST, DEBUG_NODE_LIST } from './outputNodes.js'
-import INPUT_NODES, { INPUT_NODE_LIST } from './inputNodes.js'
+import TRANSFORMS, { TRANSFORM_LIST } from './nodes/transforms/index.js'
+import OUTPUT_NODES, { OUTPUT_NODE_LIST } from './nodes/output/index.js'
+import DEBUG_NODES, { DEBUG_NODE_LIST } from './nodes/debug/index.js'
+import INPUT_NODES, { INPUT_NODE_LIST } from './nodes/input/index.js'
+
+const NODE_DEFS = { ...OUTPUT_NODES, ...DEBUG_NODES }
 
 const nodeTypes = {
   jsonNode: JsonNode,
   transform: TransformNode,
   ruleOutput: RuleOutputNode,
+  debugNode: DebugNode,
   stringInput: InputNode,
 }
 
-const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, stringInput: 220 }
+const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, debugNode: 260, stringInput: 220 }
 
 const INPUT_TYPE_ICONS = {
   string: AbcIcon,
@@ -283,8 +288,8 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
       }
       const tn = nodeMap[e.source]
       if (!tn) return undefined
-      if (tn.type === 'ruleOutput') {
-        const odef = OUTPUT_NODES[tn.data.kind]
+      if (tn.type === 'ruleOutput' || tn.type === 'debugNode') {
+        const odef = NODE_DEFS[tn.data.kind]
         if (!odef) return undefined
         const params = paramsMap[tn.id] ?? {}
         const obj = {}
@@ -373,16 +378,17 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
 
   const insertOutputNode = useCallback(
     (kind, pos) => {
-      const def = OUTPUT_NODES[kind]
+      const def = NODE_DEFS[kind]
       if (!def) return
+      const nodeType = DEBUG_NODES[kind] ? 'debugNode' : 'ruleOutput'
       const oId = `out-${++outIdRef.current}`
       setNodes((ns) => [
         ...ns,
         {
           id: oId,
-          type: 'ruleOutput',
+          type: nodeType,
           position: { x: pos.x - 130, y: pos.y - 40 },
-          width: NODE_WIDTH.ruleOutput,
+          width: NODE_WIDTH[nodeType],
           data: { kind, label: def.label },
         },
       ])
@@ -427,7 +433,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           const inEs = next.filter((e) => e.target === n.id)
           const outEs = next.filter((e) => e.source === n.id)
           next = next.filter((e) => !inEs.includes(e) && !outEs.includes(e))
-          if (n.type !== 'ruleOutput' && inEs.length === 1) {
+          if (n.type !== 'ruleOutput' && n.type !== 'debugNode' && inEs.length === 1) {
             for (const outE of outEs) {
               next = addEdge(
                 {
@@ -552,20 +558,25 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
       const posMap = restored.positions ?? {}
       for (const n of nodes) if (posMap[n.id]) n.position = posMap[n.id]
       const txNodes = (restored.transforms ?? [])
-        .map((t) => ({
-          id: t.id,
-          type: t.type ?? 'transform',
-          position: t.position,
-          width: t.width ?? NODE_WIDTH[t.type ?? 'transform'],
-          data: {
-            label: t.data?.label,
-            transformId: t.data?.transformId,
-            kind: t.data?.kind,
-          },
-        }))
+        .map((t) => {
+          const type = DEBUG_NODES[t.data?.kind]
+            ? 'debugNode'
+            : (t.type ?? 'transform')
+          return {
+            id: t.id,
+            type,
+            position: t.position,
+            width: t.width ?? NODE_WIDTH[type],
+            data: {
+              label: t.data?.label,
+              transformId: t.data?.transformId,
+              kind: t.data?.kind,
+            },
+          }
+        })
         .filter((t) =>
-          t.type === 'ruleOutput'
-            ? !!OUTPUT_NODES[t.data.kind]
+          t.type === 'ruleOutput' || t.type === 'debugNode'
+            ? !!NODE_DEFS[t.data.kind]
             : t.type === 'stringInput'
               ? !!INPUT_NODES[t.data.kind]
               : !!TRANSFORMS[t.data.transformId],
@@ -576,8 +587,8 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             ...t.data,
             label:
               t.data.label ??
-              (t.type === 'ruleOutput'
-                ? OUTPUT_NODES[t.data.kind]?.label
+              (t.type === 'ruleOutput' || t.type === 'debugNode'
+                ? NODE_DEFS[t.data.kind]?.label
                 : TRANSFORMS[t.data.transformId]?.label),
           },
         }))
@@ -755,8 +766,8 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
               : def.apply(resolver.edgeVal(ins[0], 0), nodeParams[n.id])
           data.preview = out == null ? null : String(out)
         }
-        if (n.type === 'ruleOutput') {
-          const def = OUTPUT_NODES[n.data.kind]
+        if (n.type === 'ruleOutput' || n.type === 'debugNode') {
+          const def = NODE_DEFS[n.data.kind]
           data.params = nodeParams[n.id] ?? {}
           data.wired = new Set(
             edges.filter((e) => e.target === n.id).map((e) => e.targetHandle?.slice(2)),

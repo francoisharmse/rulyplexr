@@ -1,68 +1,17 @@
 import { Handle, NodeResizeControl, Position } from '@xyflow/react'
 import { Box, Chip, Collapse, IconButton, TextField, Typography } from '@mui/material'
 import DataObjectIcon from '@mui/icons-material/DataObject'
-import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import OUTPUT_NODES from './outputNodes.js'
-import { TYPE_COLORS } from './JsonNode.jsx'
+import OUTPUT_NODES from './index.js'
+import { TYPE_COLORS } from '../input/JsonNode.jsx'
+import { DumpBox, previewText, truncate } from '../utils.jsx'
 
-const truncate = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s)
-
-const dump = (v) => {
-  if (v === undefined) return 'undefined'
-  try {
-    return JSON.stringify(v, null, 2) ?? String(v)
-  } catch {
-    return String(v)
-  }
-}
-
-const previewText = (v) =>
-  v === undefined
-    ? '—'
-    : typeof v === 'object'
-      ? truncate(JSON.stringify(v), 24)
-      : String(v)
-
-function DumpBox({ value, accent = '#66d19e' }) {
-  return (
-    <Box
-      className="nodrag nowheel"
-      sx={{
-        m: 1,
-        mt: 0.5,
-        p: 1,
-        bgcolor: 'rgba(0,0,0,0.3)',
-        border: '1px solid',
-        borderColor: 'divider',
-        borderRadius: '4px',
-        maxHeight: 220,
-        overflow: 'auto',
-      }}
-    >
-      <Box
-        component="pre"
-        sx={{
-          m: 0,
-          fontFamily: 'monospace',
-          fontSize: 11,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          color: accent,
-        }}
-      >
-        {dump(value)}
-      </Box>
-    </Box>
-  )
-}
+const ACCENT = '#66d19e'
 
 function RuleOutputNode({ data, selected }) {
   const def = OUTPUT_NODES[data.kind]
   const fields = def?.fields ?? []
   const assembledOpen = !!data.collapsedIds?.has('__assembled')
-  const accent = def?.debug ? '#ffa726' : '#66d19e'
-  const accentBg = def?.debug ? 'rgba(255,167,38,0.18)' : 'rgba(102,209,158,0.18)'
   return (
     <Box
       sx={{
@@ -70,7 +19,7 @@ function RuleOutputNode({ data, selected }) {
         minWidth: 200,
         bgcolor: 'background.paper',
         border: '1px solid',
-        borderColor: data.highlighted ? '#e6e2ff' : accent,
+        borderColor: data.highlighted ? '#e6e2ff' : ACCENT,
         boxShadow: data.highlighted ? '0 0 0 1.5px #e6e2ff' : 6,
         borderRadius: '4px',
       }}
@@ -81,7 +30,7 @@ function RuleOutputNode({ data, selected }) {
           variant="line"
           resizeDirection="horizontal"
           minWidth={200}
-          color={accent}
+          color={ACCENT}
           style={{ width: 8, transform: 'translate(-100%, 0)' }}
         />
       )}
@@ -93,39 +42,30 @@ function RuleOutputNode({ data, selected }) {
           gap: 0.75,
           px: 1.25,
           py: 0.75,
-          bgcolor: accentBg,
-          color: accent,
+          bgcolor: 'rgba(102,209,158,0.18)',
+          color: ACCENT,
           borderRadius: '3px 3px 0 0',
         }}
       >
-        {def?.debug ? (
-          <BugReportIcon sx={{ fontSize: 14 }} />
-        ) : (
-          <DataObjectIcon sx={{ fontSize: 14 }} />
-        )}
+        <DataObjectIcon sx={{ fontSize: 14 }} />
         <Typography variant="caption" sx={{ fontWeight: 700 }}>
           {def?.label ?? data.kind}
         </Typography>
-        {!def?.debug && (
-          <Handle
-            type="source"
-            position={Position.Right}
-            id="out"
-            className="rf-multi"
-            style={{ right: -4 }}
-          />
-        )}
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="out"
+          className="rf-multi"
+          style={{ right: -4 }}
+        />
       </Box>
       <Box>
         {fields.map((f) => {
           const v = data.fieldValues?.[f.key]
           const shown = v === undefined ? f.default : v
           const expandable = shown !== null && typeof shown === 'object'
-          const toggleable = !!def?.debug || expandable
-          const chipColor = TYPE_COLORS[f.type] ?? accent
-          const open = def?.debug
-            ? !data.collapsedIds?.has(f.key)
-            : !!data.collapsedIds?.has(f.key)
+          const chipColor = TYPE_COLORS[f.type] ?? ACCENT
+          const open = !!data.collapsedIds?.has(f.key)
           return (
             <Box key={f.key}>
             <Box
@@ -188,24 +128,24 @@ function RuleOutputNode({ data, selected }) {
                 />
               ) : (
                 <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
-                  {(!toggleable || !open) && (
+                  {(!expandable || !open) && (
                     <Typography
                       variant="caption"
                       noWrap
-                      sx={{ fontFamily: 'monospace', maxWidth: 110, minWidth: 0, color: accent }}
+                      sx={{ fontFamily: 'monospace', maxWidth: 110, minWidth: 0, color: ACCENT }}
                       title={JSON.stringify(shown)}
                     >
                       {previewText(shown)}
                     </Typography>
                   )}
-                  {toggleable && (
+                  {expandable && (
                     <IconButton
                       size="small"
                       onClick={(e) => {
                         e.stopPropagation()
                         data.onToggle?.(f.key)
                       }}
-                      sx={{ p: 0, color: accent }}
+                      sx={{ p: 0, color: ACCENT }}
                     >
                       <ExpandMoreIcon
                         sx={{
@@ -219,53 +159,51 @@ function RuleOutputNode({ data, selected }) {
                 </Box>
               )}
             </Box>
-            {toggleable && (
+            {expandable && (
               <Collapse in={open}>
-                <DumpBox value={shown} accent={accent} />
+                <DumpBox value={shown} accent={ACCENT} />
               </Collapse>
             )}
             </Box>
           )
         })}
       </Box>
-      {!def?.debug && (
-        <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
-          <Box sx={{ px: 1.25, py: 0.75, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <Typography
-              variant="caption"
-              noWrap
-              title={JSON.stringify(data.assembled)}
+      <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+        <Box sx={{ px: 1.25, py: 0.75, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Typography
+            variant="caption"
+            noWrap
+            title={JSON.stringify(data.assembled)}
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              fontFamily: 'monospace',
+              color: data.assembled ? ACCENT : 'text.disabled',
+            }}
+          >
+            {data.assembled ? truncate(JSON.stringify(data.assembled), 60) : '—'}
+          </Typography>
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation()
+              data.onToggle?.('__assembled')
+            }}
+            sx={{ p: 0, color: ACCENT }}
+          >
+            <ExpandMoreIcon
               sx={{
-                flex: 1,
-                minWidth: 0,
-                fontFamily: 'monospace',
-                color: data.assembled ? accent : 'text.disabled',
+                fontSize: 16,
+                transform: assembledOpen ? 'rotate(180deg)' : 'none',
+                transition: 'transform 150ms',
               }}
-            >
-              {data.assembled ? truncate(JSON.stringify(data.assembled), 60) : '—'}
-            </Typography>
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation()
-                data.onToggle?.('__assembled')
-              }}
-              sx={{ p: 0, color: accent }}
-            >
-              <ExpandMoreIcon
-                sx={{
-                  fontSize: 16,
-                  transform: assembledOpen ? 'rotate(180deg)' : 'none',
-                  transition: 'transform 150ms',
-                }}
-              />
-            </IconButton>
-          </Box>
-          <Collapse in={assembledOpen}>
-            <DumpBox value={data.assembled} accent={accent} />
-          </Collapse>
+            />
+          </IconButton>
         </Box>
-      )}
+        <Collapse in={assembledOpen}>
+          <DumpBox value={data.assembled} accent={ACCENT} />
+        </Collapse>
+      </Box>
     </Box>
   )
 }

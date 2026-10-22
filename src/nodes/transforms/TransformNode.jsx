@@ -1,7 +1,7 @@
 import { Handle, NodeResizeControl, Position } from '@xyflow/react'
 import { Box, TextField, Typography } from '@mui/material'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
-import TRANSFORMS from './transforms/index.js'
+import TRANSFORMS from './index.js'
 
 function TransformNode({ data, selected }) {
   const paramDefs = TRANSFORMS[data.transformId]?.params ?? []
