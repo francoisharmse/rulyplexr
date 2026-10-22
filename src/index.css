@@ -19,3 +19,28 @@ body,
   border: 2px solid #9d92ff;
   border-radius: 50%;
 }
+
+/* single-connection (target) — bullseye: filled center inside the ring */
+.react-flow__handle.rf-single {
+  background: radial-gradient(circle, #9d92ff 0 2.5px, transparent 3px);
+}
+
+/* multi-destination (source) — ring with two fan-out dots */
+.react-flow__handle.rf-multi::before,
+.react-flow__handle.rf-multi::after {
+  content: '';
+  position: absolute;
+  right: -8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #9d92ff;
+}
+
+.react-flow__handle.rf-multi::before {
+  top: -3px;
+}
+
+.react-flow__handle.rf-multi::after {
+  bottom: -3px;
+}

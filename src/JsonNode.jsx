@@ -108,7 +108,13 @@ function JsonNode({ data }) {
                 '&:hover': { bgcolor: 'action.hover' },
               }}
             >
-              <Handle type="target" position={Position.Left} id={`t-${row.id}`} style={{ left: -4 }} />
+              <Handle
+                type="target"
+                position={Position.Left}
+                id={`t-${row.id}`}
+                className="rf-single"
+                style={{ left: -4 }}
+              />
               <Typography
                 variant="body2"
                 sx={{ fontFamily: 'monospace', fontWeight: 600, minWidth: 90, flexShrink: 0 }}
@@ -151,7 +157,13 @@ function JsonNode({ data }) {
                   </Typography>
                 )
               )}
-              <Handle type="source" position={Position.Right} id={`s-${row.id}`} style={{ right: -4 }} />
+              <Handle
+                type="source"
+                position={Position.Right}
+                id={`s-${row.id}`}
+                className="rf-multi"
+                style={{ right: -4 }}
+              />
             </Box>
           )
         })}

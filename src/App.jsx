@@ -85,9 +85,11 @@ function Canvas({ jsonData, outputData }) {
   const onReconnect = useCallback(
     (oldEdge, conn) =>
       setEdges((eds) =>
-        reconnectEdge(oldEdge, conn, eds, {
-          shouldReplaceId: true,
-        }).filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i),
+        reconnectEdge(oldEdge, conn, eds, { shouldReplaceId: true }).filter(
+          (e) =>
+            e.id === oldEdge.id ||
+            !(e.target === conn.target && e.targetHandle === conn.targetHandle),
+        ),
       ),
     [setEdges],
   )

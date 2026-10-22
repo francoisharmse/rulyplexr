@@ -15,7 +15,7 @@ function TransformNode({ data }) {
         overflow: 'hidden',
       }}
     >
-      <Handle type="target" position={Position.Left} id="in" />
+      <Handle type="target" position={Position.Left} id="in" className="rf-single" />
       <Box
         sx={{
           display: 'flex',
@@ -42,7 +42,7 @@ function TransformNode({ data }) {
           {data.preview ?? '—'}
         </Typography>
       </Box>
-      <Handle type="source" position={Position.Right} id="out" />
+      <Handle type="source" position={Position.Right} id="out" className="rf-multi" />
     </Box>
   )
 }
