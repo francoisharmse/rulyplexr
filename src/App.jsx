@@ -13,6 +13,9 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   AppBar,
   Box,
@@ -28,6 +31,7 @@ import {
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import JsonNode, { toEntries } from './JsonNode.jsx'
 import TransformNode from './TransformNode.jsx'
 import { validateJson } from './validateJson.js'
@@ -110,6 +114,8 @@ function collectSources(node, path = '') {
 const EDGE_STYLE = { stroke: '#9d92ff', strokeWidth: 1.5 }
 const EDGE_HI_STYLE = { stroke: '#e6e2ff', strokeWidth: 2.5 }
 const EDGE_DIM_STYLE = { stroke: '#9d92ff', strokeWidth: 1.5, opacity: 0.2 }
+const EDGE_SELECTED_STYLE = { stroke: '#ffffff', strokeWidth: 3.5 }
+const EDGE_DROP_STYLE = { stroke: '#ffffff', strokeWidth: 3 }
 
 function Canvas({ jsonData }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
@@ -382,9 +388,15 @@ function Canvas({ jsonData }) {
   }, [sel, pendingSource, edges])
 
   const displayEdges = useMemo(() => {
-    if (!sel && !pendingSource && !dropEdgeId) return edges
+    const inactive = !sel && !pendingSource && !dropEdgeId
     return edges.map((e) => {
-      if (e.id === dropEdgeId) return { ...e, style: { stroke: '#ffffff', strokeWidth: 3 } }
+      if (dropEdgeId) {
+        return e.id === dropEdgeId
+          ? { ...e, style: EDGE_DROP_STYLE, animated: true }
+          : { ...e, style: EDGE_DIM_STYLE }
+      }
+      if (e.selected) return { ...e, style: EDGE_SELECTED_STYLE, animated: true }
+      if (inactive) return e
       const linked = highlighted.edgeIds.has(e.id)
       return { ...e, style: linked ? EDGE_HI_STYLE : sel || pendingSource ? EDGE_DIM_STYLE : EDGE_STYLE }
     })
@@ -627,12 +639,23 @@ function App() {
           </Stack>
 
           <Divider />
-          <Box>
-            <Typography variant="subtitle2">Transformation nodes</Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              Drag a rule onto an edge to insert it between input and output.
-            </Typography>
-            <Stack spacing={1}>
+          <Accordion
+            disableGutters
+            elevation={0}
+            defaultExpanded
+            sx={{ bgcolor: 'transparent', '&::before': { display: 'none' } }}
+          >
+            <AccordionSummary
+              expandIcon={<ExpandMoreIcon />}
+              sx={{ px: 0, minHeight: 40, '& .MuiAccordionSummary-content': { my: 0.5 } }}
+            >
+              <Typography variant="subtitle2">Transformation nodes</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Drag a rule onto an edge to insert it between input and output.
+              </Typography>
+              <Stack spacing={1}>
               {Object.entries(TRANSFORMS).map(([id, t]) => (
                 <Paper
                   key={id}
@@ -662,17 +685,38 @@ function App() {
                   </Box>
                 </Paper>
               ))}
-            </Stack>
-          </Box>
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
 
-          <Typography variant="caption" color="text.secondary">
-            Tip: paste JSON anywhere on this page (⌘/Ctrl+V).
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Map fields: click a property on the left node, then click a field on the right — or
-            drag between the dot handles. Select an edge and press ⌫ to delete; drag an edge end to
-            rewire it.
-          </Typography>
+          <Accordion
+            disableGutters
+            elevation={0}
+            sx={{
+              mt: 'auto',
+              bgcolor: 'transparent',
+              borderTop: '1px solid',
+              borderColor: 'divider',
+              '&::before': { display: 'none' },
+            }}
+          >
+            <AccordionSummary
+              expandIcon={<ExpandMoreIcon />}
+              sx={{ px: 0, minHeight: 40, '& .MuiAccordionSummary-content': { my: 0.5 } }}
+            >
+              <Typography variant="subtitle2">Tips</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                Paste JSON anywhere on this page (⌘/Ctrl+V).
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                Map fields: click a property on the left node, then click a field on the right — or
+                drag between the dot handles. Select an edge and press ⌫ to delete; drag an edge end
+                to rewire it.
+              </Typography>
+            </AccordionDetails>
+          </Accordion>
         </Paper>
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
