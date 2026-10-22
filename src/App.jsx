@@ -35,6 +35,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import JsonNode, { toEntries } from './JsonNode.jsx'
 import TransformNode from './TransformNode.jsx'
 import { validateJson } from './validateJson.js'
+import sampleInputText from '../sample_json.json?raw'
+import sampleOutputText from '../sample_output.json?raw'
 
 const nodeTypes = { jsonNode: JsonNode, transform: TransformNode }
 
@@ -47,58 +49,6 @@ const TRANSFORMS = {
       return Number.isFinite(n) ? new Date(n * 1000).toISOString() : null
     },
   },
-}
-
-const SAMPLE = `{
-  "ID": 866349049678877,
-  "MID": 3272,
-  "CON": "M",
-  "TS": 1787834040,
-  "TSL": 1787834010,
-  "IMEI": 866349049678877,
-  "UPT": 97826,
-  "FWV": 1.0.2,
-  "FWV": [
-    1,
-    0,
-    2,
-    2610274415
-  ],
-  "BAT": 24242,
-  "TEL": 20404,
-  "TRY": 1,
-  "cID": 26358530,
-  "CSQ": 14,
-  "RSRQ": -10,
-  "RSRP": -108,
-  "SNR": 122,
-  "IMSI": 901405124024107,
-  "EID": "89044045117727494800000642744165",
-  "ICCID": "89882280666240241079",
-  "MEM": 0,
-  "MSI": 30
-}`
-
-const FIELDS = {
-  "timestamp": { "type": "iso_time", "source": "TS" },
-  "device_status": {
-    "battery_level": { "type": "number", "source": "BAT", "unit": "mV" },
-    "signal_strength": { "type": "number", "source": "CSQ", "unit": "dBm" },
-    "firmware_version": { "type": "version", "source": "FWV" },
-    "imei_number": { "type": "number", "source": "ID" },
-    "modemsignaal": { "type": "number", "source": "CSQ", "unit": "dBm" },
-    "lasthistorytime": { "type": "iso_time", "source": "TS" }
-  },
-  "sensors": [
-    { "type": "analog_input", "source": "AI1", "unit": "mA", "port": "an_1", "index": 0 },
-    { "type": "analog_input", "source": "AI2", "unit": "mA", "port": "an_2", "index": 0 },
-    { "type": "analog_input", "source": "AI3", "unit": "bar", "port": "an_3", "index": 0 },
-    { "type": "analog_input", "source": "AI4", "unit": "bar", "port": "an_4", "index": 0 },
-    { "type": "digital_input", "source": "A", "port": "dig_1", "index": 0 },
-    { "type": "digital_input", "source": "A", "port": "dig_2", "index": 1 },
-    { "type": "digital_input", "source": "A", "port": "dig_3", "index": 2 },
-    { "type": "digital_input", "source": "A", "port": "dig_4", "index": 3 }
-  ]
 }
 
 function collectSources(node, path = '') {
@@ -117,7 +67,7 @@ const EDGE_DIM_STYLE = { stroke: '#9d92ff', strokeWidth: 1.5, opacity: 0.2 }
 const EDGE_SELECTED_STYLE = { stroke: '#ffffff', strokeWidth: 3.5 }
 const EDGE_DROP_STYLE = { stroke: '#ffffff', strokeWidth: 3 }
 
-function Canvas({ jsonData }) {
+function Canvas({ jsonData, outputData }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [pendingSource, setPendingSource] = useState(null)
@@ -317,7 +267,7 @@ function Canvas({ jsonData }) {
         id: 'fields',
         type: 'jsonNode',
         position: { x: 620, y: 60 },
-        data: { name: 'fields', value: FIELDS },
+        data: { name: 'output', value: outputData ?? {} },
       },
     ]
     const edges = []
@@ -329,7 +279,7 @@ function Canvas({ jsonData }) {
         data: { name: jsonData.name, value: jsonData.value },
       })
       const inputKeys = new Set(toEntries(jsonData.value).map(([k]) => k))
-      for (const m of collectSources(FIELDS)) {
+      for (const m of outputData ? collectSources(outputData) : []) {
         if (inputKeys.has(m.source)) {
           edges.push({
             id: `e-${m.source}-${m.path}`,
@@ -348,7 +298,7 @@ function Canvas({ jsonData }) {
     setPendingSource(null)
     setSel(null)
     requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }))
-  }, [jsonData, setNodes, setEdges, fitView])
+  }, [jsonData, outputData, setNodes, setEdges, fitView])
 
   const highlighted = useMemo(() => {
     const rows = { 'json-root': new Set(), fields: new Set() }
@@ -497,17 +447,38 @@ function Diagnostic({ item }) {
   )
 }
 
-function App() {
-  const [jsonText, setJsonText] = useState(SAMPLE)
-  const [jsonData, setJsonData] = useState(null)
-  const [validation, setValidation] = useState(null)
-  const fileInputRef = useRef(null)
+const SAMPLE_INPUT = validateJson(sampleInputText)
+const SAMPLE_OUTPUT = validateJson(sampleOutputText)
 
-  const renderJson = useCallback((text, name = 'JSON') => {
-    const res = validateJson(text)
-    setValidation(res)
-    setJsonData(res.ok ? { name, value: res.value } : null)
-  }, [])
+const ACCORDION_SX = { bgcolor: 'transparent', '&::before': { display: 'none' } }
+const ACCORDION_SUMMARY_SX = { px: 0, minHeight: 40, '& .MuiAccordionSummary-content': { my: 0.5 } }
+const MONO_TEXTFIELD_SX = { '& textarea': { fontFamily: 'monospace', fontSize: 12 } }
+
+function App() {
+  const [jsonText, setJsonText] = useState(sampleInputText)
+  const [jsonData, setJsonData] = useState(() =>
+    SAMPLE_INPUT.ok ? { name: 'sample.json', value: SAMPLE_INPUT.value } : null,
+  )
+  const [validation, setValidation] = useState(() => SAMPLE_INPUT)
+  const [outputText, setOutputText] = useState(sampleOutputText)
+  const [outputData, setOutputData] = useState(() =>
+    SAMPLE_OUTPUT.ok ? SAMPLE_OUTPUT.value : null,
+  )
+  const [outputValidation, setOutputValidation] = useState(() => SAMPLE_OUTPUT)
+  const fileInputRef = useRef(null)
+  const fileOutputRef = useRef(null)
+
+  const renderJson = useCallback(
+    (text, name = 'JSON', outText = null) => {
+      const res = validateJson(text)
+      setValidation(res)
+      setJsonData(res.ok ? { name, value: res.value } : null)
+      const oRes = validateJson(outText ?? outputText)
+      setOutputValidation(oRes)
+      if (oRes.ok) setOutputData(oRes.value)
+    },
+    [outputText],
+  )
 
   const handleFile = useCallback(
     (file) => {
@@ -529,9 +500,24 @@ function App() {
     [renderJson],
   )
 
-  useEffect(() => {
-    renderJson(SAMPLE, 'sample.json')
-  }, [renderJson])
+  const handleOutputFile = useCallback((file) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = String(reader.result)
+      setOutputText(text)
+      const res = validateJson(text)
+      setOutputValidation(res)
+      if (res.ok) setOutputData(res.value)
+    }
+    reader.onerror = () =>
+      setOutputValidation({
+        ok: false,
+        errors: [{ message: 'Could not read the selected file' }],
+        warnings: [],
+      })
+    reader.readAsText(file)
+  }, [])
 
   useEffect(() => {
     const onPaste = (e) => {
@@ -578,42 +564,122 @@ function App() {
             overflowY: 'auto',
           }}
         >
-          <Typography variant="subtitle2">JSON input</Typography>
-          <TextField
-            multiline
-            minRows={12}
-            maxRows={20}
-            placeholder="Paste JSON here…"
-            value={jsonText}
-            onChange={(e) => setJsonText(e.target.value)}
-            spellCheck={false}
-            sx={{
-              '& textarea': { fontFamily: 'monospace', fontSize: 12 },
-            }}
-          />
-          {validation && !validation.ok && (
-            <Alert severity="error">
-              <Typography variant="subtitle2">Invalid JSON</Typography>
-              {validation.errors.map((e, i) => (
-                <Diagnostic key={i} item={e} />
-              ))}
-            </Alert>
-          )}
-          {validation?.warnings.length > 0 && (
-            <Alert severity="warning">
-              <Typography variant="subtitle2">
-                {validation.warnings.length === 1 ? '1 warning' : `${validation.warnings.length} warnings`}
-              </Typography>
-              {validation.warnings.map((w, i) => (
-                <Diagnostic key={i} item={w} />
-              ))}
-            </Alert>
-          )}
-          {jsonData && (
-            <Alert severity="success">
-              Loaded “{jsonData.name}” — {propCount} {propCount === 1 ? 'property' : 'properties'}
-            </Alert>
-          )}
+          <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
+              <Typography variant="subtitle2">JSON input</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0 }}>
+              <TextField
+                multiline
+                fullWidth
+                minRows={12}
+                maxRows={20}
+                placeholder="Paste JSON here…"
+                value={jsonText}
+                onChange={(e) => setJsonText(e.target.value)}
+                spellCheck={false}
+                sx={MONO_TEXTFIELD_SX}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<UploadFileIcon />}
+                onClick={() => fileInputRef.current?.click()}
+                sx={{ mt: 1 }}
+              >
+                Browse…
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={(e) => handleFile(e.target.files?.[0])}
+              />
+              {validation && !validation.ok && (
+                <Alert severity="error" sx={{ mt: 1 }}>
+                  <Typography variant="subtitle2">Invalid JSON</Typography>
+                  {validation.errors.map((e, i) => (
+                    <Diagnostic key={i} item={e} />
+                  ))}
+                </Alert>
+              )}
+              {validation?.warnings.length > 0 && (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  <Typography variant="subtitle2">
+                    {validation.warnings.length === 1
+                      ? '1 warning'
+                      : `${validation.warnings.length} warnings`}
+                  </Typography>
+                  {validation.warnings.map((w, i) => (
+                    <Diagnostic key={i} item={w} />
+                  ))}
+                </Alert>
+              )}
+              {jsonData && (
+                <Alert severity="success" sx={{ mt: 1 }}>
+                  Loaded “{jsonData.name}” — {propCount}{' '}
+                  {propCount === 1 ? 'property' : 'properties'}
+                </Alert>
+              )}
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
+              <Typography variant="subtitle2">JSON output — structure</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0 }}>
+              <TextField
+                multiline
+                fullWidth
+                minRows={8}
+                maxRows={16}
+                placeholder="Output node structure…"
+                value={outputText}
+                onChange={(e) => setOutputText(e.target.value)}
+                spellCheck={false}
+                sx={MONO_TEXTFIELD_SX}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<UploadFileIcon />}
+                onClick={() => fileOutputRef.current?.click()}
+                sx={{ mt: 1 }}
+              >
+                Browse…
+              </Button>
+              <input
+                ref={fileOutputRef}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={(e) => handleOutputFile(e.target.files?.[0])}
+              />
+              {outputValidation && !outputValidation.ok && (
+                <Alert severity="error" sx={{ mt: 1 }}>
+                  <Typography variant="subtitle2">Invalid JSON</Typography>
+                  {outputValidation.errors.map((e, i) => (
+                    <Diagnostic key={i} item={e} />
+                  ))}
+                </Alert>
+              )}
+              {outputValidation?.warnings.length > 0 && (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  <Typography variant="subtitle2">
+                    {outputValidation.warnings.length === 1
+                      ? '1 warning'
+                      : `${outputValidation.warnings.length} warnings`}
+                  </Typography>
+                  {outputValidation.warnings.map((w, i) => (
+                    <Diagnostic key={i} item={w} />
+                  ))}
+                </Alert>
+              )}
+            </AccordionDetails>
+          </Accordion>
+
           <Stack direction="row" spacing={1}>
             <Button
               variant="contained"
@@ -622,33 +688,11 @@ function App() {
             >
               Render node
             </Button>
-            <Button
-              variant="outlined"
-              startIcon={<UploadFileIcon />}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              Browse…
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,application/json"
-              hidden
-              onChange={(e) => handleFile(e.target.files?.[0])}
-            />
           </Stack>
 
           <Divider />
-          <Accordion
-            disableGutters
-            elevation={0}
-            defaultExpanded
-            sx={{ bgcolor: 'transparent', '&::before': { display: 'none' } }}
-          >
-            <AccordionSummary
-              expandIcon={<ExpandMoreIcon />}
-              sx={{ px: 0, minHeight: 40, '& .MuiAccordionSummary-content': { my: 0.5 } }}
-            >
+          <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
               <Typography variant="subtitle2">Transformation nodes</Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ px: 0, pt: 0 }}>
@@ -721,7 +765,7 @@ function App() {
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <ReactFlowProvider>
-            <Canvas jsonData={jsonData} />
+            <Canvas jsonData={jsonData} outputData={outputData} />
           </ReactFlowProvider>
         </Box>
       </Box>

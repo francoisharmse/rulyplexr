@@ -1,0 +1,21 @@
+{
+  "timestamp": { "type": "iso_time", "source": "TS" },
+  "device_status": {
+    "battery_level": { "type": "number", "source": "BAT", "unit": "mV" },
+    "signal_strength": { "type": "number", "source": "CSQ", "unit": "dBm" },
+    "firmware_version": { "type": "version", "source": "FWV" },
+    "imei_number": { "type": "number", "source": "ID" },
+    "modemsignaal": { "type": "number", "source": "CSQ", "unit": "dBm" },
+    "lasthistorytime": { "type": "iso_time", "source": "TS" }
+  },
+  "sensors": [
+    { "type": "analog_input", "source": "AI1", "unit": "mA", "port": "an_1", "index": 0 },
+    { "type": "analog_input", "source": "AI2", "unit": "mA", "port": "an_2", "index": 0 },
+    { "type": "analog_input", "source": "AI3", "unit": "bar", "port": "an_3", "index": 0 },
+    { "type": "analog_input", "source": "AI4", "unit": "bar", "port": "an_4", "index": 0 },
+    { "type": "digital_input", "source": "A", "port": "dig_1", "index": 0 },
+    { "type": "digital_input", "source": "A", "port": "dig_2", "index": 1 },
+    { "type": "digital_input", "source": "A", "port": "dig_3", "index": 2 },
+    { "type": "digital_input", "source": "A", "port": "dig_4", "index": 3 }
+  ]
+}
