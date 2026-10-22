@@ -57,6 +57,8 @@ const nodeTypes = {
   stringInput: InputNode,
 }
 
+const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, stringInput: 220 }
+
 const INPUT_TYPE_ICONS = {
   string: AbcIcon,
   number: NumbersIcon,
@@ -252,7 +254,7 @@ function Canvas({ jsonData, outputData, sig }) {
         setPendingSource(null)
         return
       }
-      if (node.type !== 'jsonNode') setSel({ nodeId: node.id })
+      setSel({ nodeId: node.id })
     },
     [pendingSource, setEdges, upsertEdge],
   )
@@ -295,7 +297,7 @@ function Canvas({ jsonData, outputData, sig }) {
         const def = INPUT_NODES[tn.data.kind] ?? INPUT_NODES.string_field
         const inEdge = eds.find((x) => x.target === tn.id)
         return inEdge
-          ? def.coerce(edgeVal(inEdge, depth + 1))
+          ? def.coerce(edgeVal(inEdge, depth + 1), paramsMap[tn.id])
           : def.parse(paramsMap[tn.id])
       }
       const def = TRANSFORMS[tn.data.transformId]
@@ -330,6 +332,7 @@ function Canvas({ jsonData, outputData, sig }) {
           id: tId,
           type: 'transform',
           position: { x: pos.x - 100, y: pos.y - 20 },
+          width: NODE_WIDTH.transform,
           data: { label: t.label, transformId: type },
         },
       ])
@@ -375,6 +378,7 @@ function Canvas({ jsonData, outputData, sig }) {
           id: oId,
           type: 'ruleOutput',
           position: { x: pos.x - 130, y: pos.y - 40 },
+          width: NODE_WIDTH.ruleOutput,
           data: { kind, label: def.label },
         },
       ])
@@ -393,16 +397,18 @@ function Canvas({ jsonData, outputData, sig }) {
           id: iId,
           type: 'stringInput',
           position: { x: pos.x - 110, y: pos.y - 30 },
+          width: NODE_WIDTH.stringInput,
           data: { kind, label: def.label },
         },
       ])
       setNodeParams((p) => ({
         ...p,
-        [iId]: {
-          value: Array.isArray(def.defaultValue)
-            ? [...def.defaultValue]
-            : (def.defaultValue ?? ''),
-        },
+        [iId]: Object.fromEntries(
+          Object.entries(def.defaultParams ?? {}).map(([k, v]) => [
+            k,
+            Array.isArray(v) ? [...v] : v,
+          ]),
+        ),
       }))
     },
     [setNodes],
@@ -508,6 +514,7 @@ function Canvas({ jsonData, outputData, sig }) {
         id: 'fields',
         type: 'jsonNode',
         position: { x: 620, y: 60 },
+        width: NODE_WIDTH.jsonNode,
         data: { name: 'OUTPUT JSON', value: outputData ?? {}, rootHandle: true },
       },
     ]
@@ -517,6 +524,7 @@ function Canvas({ jsonData, outputData, sig }) {
         id: 'json-root',
         type: 'jsonNode',
         position: { x: 60, y: 60 },
+        width: NODE_WIDTH.jsonNode,
         data: { name: 'INPUT JSON', subName: jsonData.name, value: jsonData.value },
       })
       const inputKeys = new Set(toEntries(jsonData.value).map(([k]) => k))
@@ -544,6 +552,7 @@ function Canvas({ jsonData, outputData, sig }) {
           id: t.id,
           type: t.type ?? 'transform',
           position: t.position,
+          width: t.width ?? NODE_WIDTH[t.type ?? 'transform'],
           data: {
             label: t.data?.label,
             transformId: t.data?.transformId,
@@ -614,7 +623,7 @@ function Canvas({ jsonData, outputData, sig }) {
     if (pendingSource) rows['json-root'].add(pendingSource)
     if (!sel) return { rows, tNodes, edgeIds }
 
-    ;(rows[sel.nodeId] ??= new Set()).add(sel.rowId)
+    if (sel.rowId) (rows[sel.nodeId] ??= new Set()).add(sel.rowId)
     const traverse = (startEdges, forward) => {
       let frontier = startEdges
       for (let i = 0; i < 12 && frontier.length; i++) {
@@ -633,9 +642,19 @@ function Canvas({ jsonData, outputData, sig }) {
       }
     }
     if (sel.nodeId === 'json-root') {
-      traverse(edges.filter((e) => e.source === 'json-root' && e.sourceHandle === `s-${sel.rowId}`), true)
+      if (sel.rowId) {
+        traverse(edges.filter((e) => e.source === 'json-root' && e.sourceHandle === `s-${sel.rowId}`), true)
+      } else {
+        tNodes.add('json-root')
+        traverse(edges.filter((e) => e.source === 'json-root'), true)
+      }
     } else if (sel.nodeId === 'fields') {
-      traverse(edges.filter((e) => e.target === 'fields' && e.targetHandle === `t-${sel.rowId}`), false)
+      if (sel.rowId) {
+        traverse(edges.filter((e) => e.target === 'fields' && e.targetHandle === `t-${sel.rowId}`), false)
+      } else {
+        tNodes.add('fields')
+        traverse(edges.filter((e) => e.target === 'fields'), false)
+      }
     } else {
       tNodes.add(sel.nodeId)
       if (sel.rowId) {
@@ -747,7 +766,7 @@ function Canvas({ jsonData, outputData, sig }) {
           data.params = nodeParams[n.id] ?? {}
           const inEdge = edges.find((e) => e.target === n.id)
           data.wired = !!inEdge
-          data.wiredValue = inEdge ? def.coerce(resolver.edgeVal(inEdge, 0)) : undefined
+          data.wiredValue = inEdge ? def.coerce(resolver.edgeVal(inEdge, 0), nodeParams[n.id]) : undefined
         }
         return { ...n, data }
       })
@@ -768,6 +787,7 @@ function Canvas({ jsonData, outputData, sig }) {
               id: n.id,
               type: n.type,
               position: n.position,
+              width: n.width,
               data: { label: n.data.label, transformId: n.data.transformId, kind: n.data.kind },
             })),
           edges: edges.map(

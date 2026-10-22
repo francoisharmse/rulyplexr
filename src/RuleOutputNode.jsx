@@ -1,4 +1,4 @@
-import { Handle, Position } from '@xyflow/react'
+import { Handle, NodeResizeControl, Position } from '@xyflow/react'
 import { Box, Chip, Collapse, IconButton, TextField, Typography } from '@mui/material'
 import DataObjectIcon from '@mui/icons-material/DataObject'
 import BugReportIcon from '@mui/icons-material/BugReport'
@@ -57,7 +57,7 @@ function DumpBox({ value, accent = '#66d19e' }) {
   )
 }
 
-function RuleOutputNode({ data }) {
+function RuleOutputNode({ data, selected }) {
   const def = OUTPUT_NODES[data.kind]
   const fields = def?.fields ?? []
   const assembledOpen = !!data.collapsedIds?.has('__assembled')
@@ -66,7 +66,8 @@ function RuleOutputNode({ data }) {
   return (
     <Box
       sx={{
-        width: 260,
+        width: '100%',
+        minWidth: 200,
         bgcolor: 'background.paper',
         border: '1px solid',
         borderColor: data.highlighted ? '#e6e2ff' : accent,
@@ -74,6 +75,16 @@ function RuleOutputNode({ data }) {
         borderRadius: '4px',
       }}
     >
+      {selected && (
+        <NodeResizeControl
+          position="right"
+          variant="line"
+          resizeDirection="horizontal"
+          minWidth={200}
+          color={accent}
+          style={{ width: 8, transform: 'translate(-100%, 0)' }}
+        />
+      )}
       <Box
         sx={{
           position: 'relative',

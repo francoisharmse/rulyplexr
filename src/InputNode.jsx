@@ -1,4 +1,4 @@
-import { Handle, Position } from '@xyflow/react'
+import { Handle, NodeResizeControl, Position } from '@xyflow/react'
 import { Box, Button, IconButton, Switch, TextField, Typography } from '@mui/material'
 import AbcIcon from '@mui/icons-material/Abc'
 import NumbersIcon from '@mui/icons-material/Numbers'
@@ -25,7 +25,7 @@ const monoInputStyle = (wired) => ({
   ...(wired ? { WebkitTextFillColor: '#e6e2ff' } : {}),
 })
 
-function InputNode({ data }) {
+function InputNode({ data, selected }) {
   const def = INPUT_NODES[data.kind] ?? INPUT_NODES.string_field
   const Icon = TYPE_ICONS[def.type] ?? AbcIcon
   const rawItems = Array.isArray(data.params?.value) ? data.params.value : []
@@ -42,7 +42,8 @@ function InputNode({ data }) {
   return (
     <Box
       sx={{
-        width: 220,
+        width: '100%',
+        minWidth: 160,
         bgcolor: 'background.paper',
         border: '1px solid',
         borderColor: data.highlighted ? '#e6e2ff' : '#5eb4ff',
@@ -50,6 +51,16 @@ function InputNode({ data }) {
         borderRadius: '4px',
       }}
     >
+      {selected && (
+        <NodeResizeControl
+          position="right"
+          variant="line"
+          resizeDirection="horizontal"
+          minWidth={160}
+          color="#5eb4ff"
+          style={{ width: 8, transform: 'translate(-100%, 0)' }}
+        />
+      )}
       <Handle type="target" position={Position.Left} id="in" className="rf-single" />
       <Box
         sx={{
