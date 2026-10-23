@@ -1,5 +1,5 @@
 import { AssembledBar, InputFieldRow, ParamControls } from '../utils.jsx'
-import { TYPE_COLORS } from '../input/JsonNode.jsx'
+import { TYPE_COLORS } from '../core/JsonNode.jsx'
 
 const ACCENT = '#66d19e'
 

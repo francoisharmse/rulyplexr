@@ -10,6 +10,7 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  useUpdateNodeInternals,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
@@ -44,7 +45,8 @@ import DataObjectIcon from '@mui/icons-material/DataObject'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import SearchIcon from '@mui/icons-material/Search'
-import JsonNode, { toEntries, typeOf, isField } from './nodes/input/JsonNode.jsx'
+import JsonNode, { toEntries, toRows, typeOf, isField } from './nodes/core/JsonNode.jsx'
+import MapperV2Node from './nodes/core/MapperV2Node.jsx'
 import TransformNode from './nodes/transforms/TransformNode.jsx'
 import RuleOutputNode from './nodes/output/RuleOutputNode.jsx'
 import DebugNode from './nodes/debug/DebugNode.jsx'
@@ -57,6 +59,7 @@ import TRANSFORMS, { TRANSFORM_LIST } from './nodes/transforms/index.js'
 import OUTPUT_NODES, { OUTPUT_NODE_LIST } from './nodes/output/index.js'
 import DEBUG_NODES, { DEBUG_NODE_LIST } from './nodes/debug/index.js'
 import INPUT_NODES, { INPUT_NODE_LIST } from './nodes/input/index.js'
+import CORE_NODES, { CORE_NODE_LIST, MAPPER_TYPES } from './nodes/core/index.js'
 
 const NODE_DEFS = { ...OUTPUT_NODES, ...DEBUG_NODES }
 
@@ -66,9 +69,39 @@ const nodeTypes = {
   ruleOutput: RuleOutputNode,
   debugNode: DebugNode,
   stringInput: InputNode,
+  mapperV1: JsonNode,
+  mapperV2: MapperV2Node,
 }
 
-const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, debugNode: 260, stringInput: 220 }
+const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, debugNode: 260, stringInput: 220, mapperV1: 360, mapperV2: 360 }
+
+const JSON_TYPE_NAMES = new Set(['string', 'number', 'boolean', 'array', 'object', 'null'])
+const capFieldType = (t) => t[0].toUpperCase() + t.slice(1)
+
+const projectMapperFields = (tmpl, path, resolveLeaf) => {
+  if (Array.isArray(tmpl))
+    return tmpl.map((el, i) =>
+      projectMapperFields(el, path ? `${path}.${i}` : String(i), resolveLeaf),
+    )
+  if (tmpl !== null && typeof tmpl === 'object') {
+    if (isField(tmpl)) {
+      const rv = resolveLeaf?.(path)
+      const ft = JSON_TYPE_NAMES.has(tmpl.type)
+        ? tmpl.type
+        : rv !== undefined
+          ? typeOf(rv)
+          : 'string'
+      return { ...tmpl, Field_Type: capFieldType(ft), Unit: tmpl.unit ?? '' }
+    }
+    return Object.fromEntries(
+      Object.entries(tmpl).map(([k, x]) => [
+        k,
+        projectMapperFields(x, path ? `${path}.${k}` : k, resolveLeaf),
+      ]),
+    )
+  }
+  return tmpl
+}
 
 const INPUT_TYPE_ICONS = {
   string: AbcIcon,
@@ -110,9 +143,10 @@ const EDGE_DIM_STYLE = { stroke: '#9d92ff', strokeWidth: 1.5, opacity: 0.2 }
 const EDGE_SELECTED_STYLE = { stroke: '#ffffff', strokeWidth: 3.5 }
 const EDGE_DROP_STYLE = { stroke: '#ffffff', strokeWidth: 3 }
 
-function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput }) {
+function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput, onUpdateOutput }) {
   const restoredRef = useRef()
   const lastBuildRef = useRef(null)
+  const didInitFitRef = useRef(false)
   if (restoredRef.current === undefined) restoredRef.current = loadSavedGraph(sig)
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
@@ -124,7 +158,10 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
   const txIdRef = useRef(0)
   const outIdRef = useRef(0)
   const inIdRef = useRef(0)
+  const mapIdRef = useRef(0)
+  const fieldsRemovedRef = useRef(false)
   const { fitView, screenToFlowPosition, getNode, getNodes } = useReactFlow()
+  const updateNodeInternals = useUpdateNodeInternals()
 
   const isMultiTarget = useCallback(
     (nodeId) => {
@@ -192,7 +229,11 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
     if (!selNodes.length) return
     const created = selNodes.map((n) => {
       const prefix = /^[a-z]+/.exec(n.id)?.[0]
-      const ref = prefix === 'out' ? outIdRef : prefix === 'in' ? inIdRef : txIdRef
+      const ref =
+        prefix === 'out' ? outIdRef
+        : prefix === 'in' ? inIdRef
+        : prefix === 'map' ? mapIdRef
+        : txIdRef
       return {
         ...n,
         id: `${prefix ?? 'tx'}-${++ref.current}`,
@@ -250,34 +291,37 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           .split('.')
           .reduce((o, k) => (o == null ? o : o[k]), inputObj)
       }
-      if (e.source === 'fields') {
-        if (e.sourceHandle === 's-root') return fieldsValue
+      const tn = nodeMap[e.source]
+      const mapperType =
+        e.source === 'fields' ? 'mapperV1' : MAPPER_TYPES.has(tn?.type) ? tn.type : null
+      if (mapperType) {
+        const tmpl = e.source === 'fields' ? fieldsValue : tn?.data?.value
+        const leafEdge = (p) =>
+          eds.find((x) => x.target === e.source && x.targetHandle === `t-${p}`)
+        if (e.sourceHandle === 's-root')
+          return mapperType === 'mapperV2'
+            ? projectMapperFields(tmpl, '', (p) => edgeVal(leafEdge(p), depth + 1))
+            : tmpl
         const path = e.sourceHandle?.slice(2)
-        const direct = eds.find(
-          (x) => x.target === 'fields' && x.targetHandle === `t-${path}`,
-        )
+        const direct = leafEdge(path)
         if (direct) return edgeVal(direct, depth + 1)
         const subtree = path
           ?.split('.')
-          .reduce((o, k) => (o == null ? o : o[k]), fieldsValue)
-        const rebuild = (tmpl, p) => {
-          if (tmpl === null || typeof tmpl !== 'object') return tmpl
-          if (Array.isArray(tmpl))
-            return tmpl.map((el, i) => rebuild(el, p ? `${p}.${i}` : String(i)))
-          if (typeof tmpl.source === 'string') {
-            const r = edgeVal(
-              eds.find((x) => x.target === 'fields' && x.targetHandle === `t-${p}`),
-              depth + 1,
-            )
-            return { ...tmpl, source: r !== undefined ? r : tmpl.source }
+          .reduce((o, k) => (o == null ? o : o[k]), tmpl)
+        const rebuild = (t, p) => {
+          if (t === null || typeof t !== 'object') return t
+          if (Array.isArray(t))
+            return t.map((el, i) => rebuild(el, p ? `${p}.${i}` : String(i)))
+          if (typeof t.source === 'string') {
+            const r = edgeVal(leafEdge(p), depth + 1)
+            return { ...t, source: r !== undefined ? r : t.source }
           }
           return Object.fromEntries(
-            Object.entries(tmpl).map(([k, v]) => [k, rebuild(v, p ? `${p}.${k}` : k)]),
+            Object.entries(t).map(([k, v]) => [k, rebuild(v, p ? `${p}.${k}` : k)]),
           )
         }
         return subtree === undefined ? undefined : rebuild(subtree, path)
       }
-      const tn = nodeMap[e.source]
       if (!tn) return undefined
       if (tn.type === 'ruleOutput' || tn.type === 'debugNode') {
         const odef = NODE_DEFS[tn.data.kind]
@@ -479,8 +523,51 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
     [setNodes],
   )
 
+  const insertCoreNode = useCallback(
+    (kind, pos) => {
+      const def = CORE_NODES[kind]
+      if (!def) return
+      const mId = `map-${++mapIdRef.current}`
+      setNodes((ns) => [
+        ...ns,
+        {
+          id: mId,
+          type: def.nodeType,
+          position: { x: pos.x - 180, y: pos.y - 40 },
+          width: NODE_WIDTH[def.nodeType],
+          data: {
+            kind,
+            label: def.label,
+            name: def.label.toUpperCase(),
+            value: outputData ?? {},
+            rootHandle: true,
+          },
+        },
+      ])
+      if (jsonData && outputData) {
+        const inputKeys = new Set(toEntries(jsonData.value).map(([k]) => k))
+        setEdges((eds) => [
+          ...eds,
+          ...collectSources(outputData)
+            .filter((m) => inputKeys.has(m.source))
+            .map((m) => ({
+              id: `e-${m.source}-${mId}-${m.path}`,
+              source: 'json-root',
+              sourceHandle: `s-${m.source}`,
+              target: mId,
+              targetHandle: `t-${m.path}`,
+              reconnectable: true,
+              style: EDGE_STYLE,
+            })),
+        ])
+      }
+    },
+    [setNodes, setEdges, jsonData, outputData],
+  )
+
   const onBeforeDelete = useCallback(
     ({ nodes: dNodes }) => {
+      if (dNodes.some((n) => n.id === 'fields')) fieldsRemovedRef.current = true
       if (!dNodes.some((n) => n.type !== 'jsonNode')) return true
       setEdges((eds) => {
         let next = eds
@@ -488,7 +575,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           const inEs = next.filter((e) => e.target === n.id)
           const outEs = next.filter((e) => e.source === n.id)
           next = next.filter((e) => !inEs.includes(e) && !outEs.includes(e))
-          if (n.type !== 'ruleOutput' && n.type !== 'debugNode' && inEs.length === 1) {
+          if (n.type !== 'ruleOutput' && n.type !== 'debugNode' && !MAPPER_TYPES.has(n.type) && inEs.length === 1) {
             for (const outE of outEs) {
               next = addEdge(
                 {
@@ -535,7 +622,12 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
     const type = e.dataTransfer.getData('application/x-transform-node')
     const outType = e.dataTransfer.getData('application/x-output-node')
     const inType = e.dataTransfer.getData('application/x-input-node')
+    const coreType = e.dataTransfer.getData('application/x-core-node')
     const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+    if (coreType) {
+      insertCoreNode(coreType, pos)
+      return
+    }
     if (outType) {
       insertOutputNode(outType, pos)
       return
@@ -574,15 +666,18 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
     )
       return
     lastBuildRef.current = { jsonData, outputData }
-    const nodes = [
-      {
-        id: 'fields',
-        type: 'jsonNode',
-        position: { x: 620, y: 60 },
-        width: NODE_WIDTH.jsonNode,
-        data: { name: 'JSON MAPPER', value: outputData ?? {}, rootHandle: true },
-      },
-    ]
+    if (restoredRef.current?.fieldsRemoved) fieldsRemovedRef.current = true
+    const nodes = fieldsRemovedRef.current
+      ? []
+      : [
+          {
+            id: 'fields',
+            type: 'jsonNode',
+            position: { x: 620, y: 60 },
+            width: NODE_WIDTH.jsonNode,
+            data: { name: 'JSON MAPPER', value: outputData ?? {}, rootHandle: true },
+          },
+        ]
     const edges = []
     if (jsonData) {
       nodes.unshift({
@@ -593,7 +688,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         data: { name: 'INPUT JSON', subName: jsonData.name, value: jsonData.value },
       })
       const inputKeys = new Set(toEntries(jsonData.value).map(([k]) => k))
-      for (const m of outputData ? collectSources(outputData) : []) {
+      for (const m of outputData && !fieldsRemovedRef.current ? collectSources(outputData) : []) {
         if (inputKeys.has(m.source)) {
           edges.push({
             id: `e-${m.source}-${m.path}`,
@@ -634,7 +729,9 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             ? !!NODE_DEFS[t.data.kind]
             : t.type === 'stringInput'
               ? !!INPUT_NODES[t.data.kind]
-              : !!TRANSFORMS[t.data.transformId],
+              : MAPPER_TYPES.has(t.type)
+                ? !!CORE_NODES[t.data.kind]
+                : !!TRANSFORMS[t.data.transformId],
         )
         .map((t) => ({
           ...t,
@@ -659,6 +756,10 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         0,
         ...txNodes.map((t) => Number(/^in-(\d+)$/.exec(t.id)?.[1]) || 0),
       )
+      mapIdRef.current = Math.max(
+        0,
+        ...txNodes.map((t) => Number(/^map-(\d+)$/.exec(t.id)?.[1]) || 0),
+      )
       setNodes([...nodes, ...txNodes])
       setEdges(
         (restored.edges ?? [])
@@ -672,18 +773,39 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         ),
       )
       setSel(restored.sel ?? null)
+      didInitFitRef.current = true
       requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }))
       return
     }
     setNodes((prev) => {
       const pos = Object.fromEntries(prev.map((n) => [n.id, n.position]))
-      return nodes.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n))
+      return [
+        ...nodes.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)),
+        ...prev.filter((n) => n.type !== 'jsonNode'),
+      ]
     })
-    setEdges(edges)
-    setPendingSource(null)
-    setSel(null)
-    setCollapsed({})
-    requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }))
+    const validMapperTargets = new Set(
+      toRows(outputData ?? {}).map((r) => `t-${r.id}`),
+    )
+    setEdges((prev) => [
+      ...edges,
+      ...prev.filter(
+        (e) =>
+          !(e.source === 'json-root' && e.target === 'fields') &&
+          !(
+            (e.target === 'fields' || e.target.startsWith('map-')) &&
+            e.targetHandle?.startsWith('t-') &&
+            !validMapperTargets.has(e.targetHandle)
+          ),
+      ),
+    ])
+    if (!didInitFitRef.current) {
+      didInitFitRef.current = true
+      setPendingSource(null)
+      setSel(null)
+      setCollapsed({})
+      requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }))
+    }
   }, [jsonData, outputData, setNodes, setEdges, fitView])
 
   const highlighted = useMemo(() => {
@@ -705,6 +827,10 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           else if (nxt === 'json-root') rows['json-root'].add(e.sourceHandle?.slice(2))
           else {
             tNodes.add(nxt)
+            if (MAPPER_TYPES.has(getNode(nxt)?.type))
+              (rows[nxt] ??= new Set()).add(
+                (forward ? e.sourceHandle : e.targetHandle)?.slice(2),
+              )
             next.push(...edges.filter((x) => (forward ? x.source === nxt : x.target === nxt)))
           }
         }
@@ -776,6 +902,14 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
 
   useEffect(() => {
     const inputObj = jsonData?.value
+    const commitOutput = (next) => {
+      onUpdateOutput?.(next)
+      requestAnimationFrame(() => {
+        for (const x of getNodes())
+          if (x.id === 'fields' || MAPPER_TYPES.has(x.type))
+            updateNodeInternals(x.id)
+      })
+    }
     setNodes((ns) => {
       const tNodeMap = Object.fromEntries(
         ns.filter((n) => n.type !== 'jsonNode').map((n) => [n.id, n]),
@@ -791,19 +925,182 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           selectedIds: [...(highlighted.rows[n.id] ?? [])],
           highlighted: highlighted.tNodes.has(n.id),
           onBrowse:
-            n.id === 'json-root' ? onBrowseFile : n.id === 'fields' ? onBrowseOutput : undefined,
+            n.id === 'json-root' ? onBrowseFile : n.id === 'fields' || MAPPER_TYPES.has(n.type) ? onBrowseOutput : undefined,
           onPasteJson:
-            n.id === 'json-root' ? onPasteJson : n.id === 'fields' ? onPasteOutput : undefined,
+            n.id === 'json-root' ? onPasteJson : n.id === 'fields' || MAPPER_TYPES.has(n.type) ? onPasteOutput : undefined,
         }
-        if (n.id === 'fields') {
+        if (n.id === 'fields' || MAPPER_TYPES.has(n.type)) {
+          data.value = outputData ?? {}
+          if (MAPPER_TYPES.has(n.type)) {
+            data.name ??= CORE_NODES[n.data.kind]?.label.toUpperCase()
+            data.rootHandle = true
+          }
           const values = {}
           for (const e of edges) {
-            if (e.target === 'fields' && e.targetHandle) {
-              const v = resolver.at('fields', e.targetHandle)
+            if (e.target === n.id && e.targetHandle) {
+              const v = resolver.at(n.id, e.targetHandle)
               if (v !== undefined) values[e.targetHandle.slice(2)] = v
             }
           }
           data.values = values
+          data.onFieldSave = (path, f) => {
+            const next = JSON.parse(JSON.stringify(outputData ?? {}))
+            const segs = path.split('.')
+            const parent = segs.slice(0, -1).reduce((o, k) => o?.[k], next)
+            const key = segs[segs.length - 1]
+            const leaf = parent?.[key]
+            if (parent == null || leaf === undefined) return
+            const upd = {
+              ...(leaf !== null && typeof leaf === 'object' ? leaf : {}),
+              type: f.type,
+            }
+            if (f.unit) upd.unit = f.unit
+            else delete upd.unit
+            if (f.source) upd.source = f.source
+            else delete upd.source
+            if (Array.isArray(parent)) {
+              parent[Number(key)] = upd
+            } else {
+              const newKey =
+                f.name?.trim() && !(f.name.trim() in parent && f.name.trim() !== key)
+                  ? f.name.trim()
+                  : key
+              const entries = Object.entries(parent).map(([k, v]) =>
+                k === key ? [newKey, upd] : [k, v],
+              )
+              for (const k of Object.keys(parent)) delete parent[k]
+              Object.assign(parent, Object.fromEntries(entries))
+            }
+            commitOutput(next)
+          }
+          data.onFieldDelete = (path) => {
+            const next = JSON.parse(JSON.stringify(outputData ?? {}))
+            const segs = path.split('.')
+            const parent = segs.slice(0, -1).reduce((o, k) => o?.[k], next)
+            if (Array.isArray(parent)) parent.splice(Number(segs[segs.length - 1]), 1)
+            else if (parent && typeof parent === 'object') delete parent[segs[segs.length - 1]]
+            commitOutput(next)
+          }
+          data.maxDepth = 3
+          data.onAddChild = (path, f) => {
+            const next = JSON.parse(JSON.stringify(outputData ?? {}))
+            let parent = next
+            if (path) {
+              const segs = path.split('.')
+              parent = segs.reduce((o, k) => o?.[k], next)
+              if (isField(parent)) {
+                if (parent.type !== 'object' && parent.type !== 'array') return
+                const gp = segs.slice(0, -1).reduce((o, k) => o?.[k], next)
+                const rest = Object.fromEntries(
+                  Object.entries(parent).filter(
+                    ([k]) => !['type', 'unit', 'source'].includes(k),
+                  ),
+                )
+                gp[segs[segs.length - 1]] = parent = parent.type === 'array' ? [] : rest
+              }
+            }
+            const child =
+              f.type === 'object' ? {} : f.type === 'array' ? [] : { type: f.type, unit: f.unit }
+            if (Array.isArray(parent)) {
+              const key = f.name?.trim()
+              parent.push(key ? { [key]: child } : child)
+            } else if (parent && typeof parent === 'object') {
+              const key = f.name?.trim()
+              if (!key) return
+              parent[key] = child
+            } else return
+            commitOutput(next)
+          }
+          data.onFieldMove = (srcId, dstId, pos) => {
+            if (srcId === dstId) return
+            const sSegs = srcId.split('.')
+            const sParent = sSegs.slice(0, -1).join('.')
+            const dSegs = dstId.split('.')
+            if (sParent !== dSegs.slice(0, -1).join('.')) return
+            const next = JSON.parse(JSON.stringify(outputData ?? {}))
+            const parent = sParent
+              ? sParent.split('.').reduce((o, k) => o?.[k], next)
+              : next
+            if (!parent || typeof parent !== 'object') return
+            const sKey = sSegs[sSegs.length - 1]
+            const dKey = dSegs[dSegs.length - 1]
+            if (Array.isArray(parent)) {
+              const from = Number(sKey)
+              const to = Number(dKey)
+              if (
+                !Number.isInteger(from) ||
+                !Number.isInteger(to) ||
+                from < 0 ||
+                to < 0 ||
+                from >= parent.length ||
+                to >= parent.length
+              )
+                return
+              const [item] = parent.splice(from, 1)
+              const idx = to > from ? to - 1 : to
+              const insertAt = pos === 'before' ? idx : idx + 1
+              parent.splice(insertAt, 0, item)
+              if (insertAt !== from) {
+                const prefix = `${sParent}.`
+                const mapIdx = (o) =>
+                  o === from
+                    ? insertAt
+                    : insertAt > from && o > from && o <= insertAt
+                      ? o - 1
+                      : insertAt < from && o >= insertAt && o < from
+                        ? o + 1
+                        : o
+                const remapPath = (p) => {
+                  if (typeof p !== 'string' || !p.startsWith(prefix)) return p
+                  const rest = p.slice(prefix.length)
+                  const seg = rest.split('.')[0]
+                  const i = Number(seg)
+                  if (!seg || !Number.isInteger(i)) return p
+                  return `${prefix}${mapIdx(i)}${rest.slice(seg.length)}`
+                }
+                const remapHandle = (h) =>
+                  h && (h.startsWith('t-') || h.startsWith('s-'))
+                    ? `${h.slice(0, 2)}${remapPath(h.slice(2))}`
+                    : h
+                setEdges((es) =>
+                  es.map((e) => {
+                    const sourceHandle = remapHandle(e.sourceHandle)
+                    const targetHandle = remapHandle(e.targetHandle)
+                    return sourceHandle === e.sourceHandle &&
+                      targetHandle === e.targetHandle
+                      ? e
+                      : { ...e, sourceHandle, targetHandle }
+                  }),
+                )
+                setCollapsed((c) =>
+                  Object.fromEntries(
+                    Object.entries(c).map(([nid, s]) => [
+                      nid,
+                      new Set([...s].map(remapPath)),
+                    ]),
+                  ),
+                )
+                setSel((s) =>
+                  s?.rowId ? { ...s, rowId: remapPath(s.rowId) } : s,
+                )
+                setPendingSource((p) => (p ? remapPath(p) : p))
+              }
+            } else {
+              const entries = Object.entries(parent)
+              const from = entries.findIndex(([k]) => k === sKey)
+              const to = entries.findIndex(([k]) => k === dKey)
+              if (from < 0 || to < 0) return
+              const [item] = entries.splice(from, 1)
+              const idx = to > from ? to - 1 : to
+              entries.splice(pos === 'before' ? idx : idx + 1, 0, item)
+              for (const k of Object.keys(parent)) delete parent[k]
+              Object.assign(parent, Object.fromEntries(entries))
+            }
+            commitOutput(next)
+          }
+          if (n.type === 'mapperV2')
+            data.onAddField = (name, type, unit) =>
+              data.onAddChild('', { name, type, unit })
         }
         if (n.type === 'transform') {
           const def = TRANSFORMS[n.data.transformId]
@@ -851,7 +1148,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         return { ...n, data }
       })
     })
-  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, jsonData, outputData, edges, makeResolver, nodeSig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput])
+  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, setEdges, setSel, setCollapsed, setPendingSource, jsonData, outputData, edges, makeResolver, nodeSig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput, onUpdateOutput, getNodes, updateNodeInternals])
 
   useEffect(() => {
     if (!nodes.length) return
@@ -886,6 +1183,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
               .filter((n) => n.id === 'json-root' || n.id === 'fields')
               .map((n) => [n.id, n.position]),
           ),
+          fieldsRemoved: !nodes.some((n) => n.id === 'fields'),
           nodeParams,
           collapsed: Object.fromEntries(
             Object.entries(collapsed).map(([k, s]) => [k, [...s]]),
@@ -1007,16 +1305,25 @@ function App() {
   const fileOutputRef = useRef(null)
   const openInputPicker = useCallback(() => fileInputRef.current?.click(), [])
 
+  const applyOutputText = useCallback((text) => {
+    if (!text.trim()) {
+      setOutputValidation({ ok: true, errors: [], warnings: [] })
+      setOutputData(null)
+      return
+    }
+    const res = validateJson(text)
+    setOutputValidation(res)
+    setOutputData(res.ok ? res.value : null)
+  }, [])
+
   const renderJson = useCallback(
     (text, name = 'JSON', outText = null) => {
       const res = validateJson(text)
       setValidation(res)
       setJsonData(res.ok ? { name, value: res.value } : null)
-      const oRes = validateJson(outText ?? outputText)
-      setOutputValidation(oRes)
-      if (oRes.ok) setOutputData(oRes.value)
+      applyOutputText(outText ?? outputText)
     },
-    [outputText],
+    [outputText, applyOutputText],
   )
 
   const openOutputPicker = useCallback(() => fileOutputRef.current?.click(), [])
@@ -1046,15 +1353,13 @@ function App() {
   const submitPaste = useCallback(() => {
     if (pasteState === 'output') {
       setOutputText(pasteText)
-      const res = validateJson(pasteText)
-      setOutputValidation(res)
-      if (res.ok) setOutputData(res.value)
+      applyOutputText(pasteText)
     } else {
       setJsonText(pasteText)
       renderJson(pasteText)
     }
     setPasteState(null)
-  }, [pasteState, pasteText, renderJson])
+  }, [pasteState, pasteText, renderJson, applyOutputText])
 
   const handleFile = useCallback(
     (file) => {
@@ -1076,15 +1381,21 @@ function App() {
     [renderJson],
   )
 
+  const onUpdateOutput = useCallback((next) => {
+    const text = JSON.stringify(next, null, 2)
+    setOutputText(text)
+    const res = validateJson(text)
+    setOutputValidation(res)
+    if (res.ok) setOutputData(res.value)
+  }, [])
+
   const handleOutputFile = useCallback((file) => {
     if (!file) return
     const reader = new FileReader()
     reader.onload = () => {
       const text = String(reader.result)
       setOutputText(text)
-      const res = validateJson(text)
-      setOutputValidation(res)
-      if (res.ok) setOutputData(res.value)
+      applyOutputText(text)
     }
     reader.onerror = () =>
       setOutputValidation({
@@ -1093,7 +1404,7 @@ function App() {
         warnings: [],
       })
     reader.readAsText(file)
-  }, [])
+  }, [applyOutputText])
 
   useEffect(() => {
     const onPaste = (e) => {
@@ -1294,6 +1605,50 @@ function App() {
               },
             }}
           />
+          {(!!paletteFilter.trim() ? CORE_NODE_LIST.some(nodeMatches) : true) && (
+          <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
+              <Typography variant="subtitle2">Core nodes</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Drag a mapper onto the canvas — wire input fields to its rows.
+              </Typography>
+              <Stack spacing={1}>
+              {CORE_NODE_LIST.filter(nodeMatches).map((c) => (
+                <Paper
+                  key={c.id}
+                  variant="outlined"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/x-core-node', c.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                  }}
+                  sx={{
+                    p: 1,
+                    cursor: 'grab',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    '&:active': { cursor: 'grabbing' },
+                  }}
+                >
+                  <AccountTreeIcon fontSize="small" sx={{ color: '#7c6cff' }} />
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {c.label}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {c.description}
+                    </Typography>
+                  </Box>
+                </Paper>
+              ))}
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
+          )}
+
           {(!!paletteFilter.trim() ? TRANSFORM_LIST.some(nodeMatches) : true) && (
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
@@ -1538,6 +1893,7 @@ function App() {
               onPasteJson={onPasteJson}
               onBrowseOutput={openOutputPicker}
               onPasteOutput={onPasteOutput}
+              onUpdateOutput={onUpdateOutput}
               sig={hashStr(
                 JSON.stringify(jsonData?.value ?? null) +
                   '' +

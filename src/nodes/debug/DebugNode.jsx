@@ -3,7 +3,7 @@ import { Box, Chip, Collapse, IconButton, Typography } from '@mui/material'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import DEBUG_NODES from './index.js'
-import { TYPE_COLORS } from '../input/JsonNode.jsx'
+import { TYPE_COLORS } from '../core/JsonNode.jsx'
 import { CopyButton, DumpBox, previewText } from '../utils.jsx'
 
 const ACCENT = '#ffa726'

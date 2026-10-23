@@ -1,7 +1,7 @@
 import { Handle, Position } from '@xyflow/react'
 import { Box, Chip, Collapse, IconButton, TextField, Typography } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { TYPE_COLORS } from '../input/JsonNode.jsx'
+import { TYPE_COLORS } from '../core/JsonNode.jsx'
 import { AssembledBar, DumpBox, previewText } from '../utils.jsx'
 
 const ACCENT = '#66d19e'
