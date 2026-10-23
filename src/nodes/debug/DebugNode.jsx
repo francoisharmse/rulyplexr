@@ -4,7 +4,7 @@ import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import DEBUG_NODES from './index.js'
 import { TYPE_COLORS } from '../input/JsonNode.jsx'
-import { DumpBox, previewText } from '../utils.jsx'
+import { CopyButton, DumpBox, previewText } from '../utils.jsx'
 
 const ACCENT = '#ffa726'
 
@@ -117,6 +117,7 @@ function DebugNode({ data, selected }) {
                     {previewText(shown)}
                   </Typography>
                 )}
+                <CopyButton value={shown} accent={ACCENT} />
                 <IconButton
                   size="small"
                   onClick={(e) => {

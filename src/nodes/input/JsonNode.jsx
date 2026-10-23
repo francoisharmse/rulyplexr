@@ -14,7 +14,7 @@ export const TYPE_COLORS = {
   array: '#ff6eb4',
 }
 
-const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v)
+export const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v)
 
 const truncate = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s)
 
@@ -31,7 +31,7 @@ export function toEntries(value) {
   return [['value', value]]
 }
 
-const isField = (v) =>
+export const isField = (v) =>
   v !== null && !Array.isArray(v) && typeof v === 'object' && typeof v.type === 'string'
 
 const MAX_DEPTH = 1

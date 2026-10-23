@@ -44,7 +44,7 @@ import DataObjectIcon from '@mui/icons-material/DataObject'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import SearchIcon from '@mui/icons-material/Search'
-import JsonNode, { toEntries } from './nodes/input/JsonNode.jsx'
+import JsonNode, { toEntries, typeOf, isField } from './nodes/input/JsonNode.jsx'
 import TransformNode from './nodes/transforms/TransformNode.jsx'
 import RuleOutputNode from './nodes/output/RuleOutputNode.jsx'
 import DebugNode from './nodes/debug/DebugNode.jsx'
@@ -173,37 +173,6 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
     [setEdges, isMultiTarget],
   )
 
-  const handleRowClick = useCallback(
-    (nodeId, rowId) => {
-      if (nodeId === 'json-root') {
-        setPendingSource((p) => (p === rowId ? null : rowId))
-        setSel((s) =>
-          s?.nodeId === nodeId && s.rowId === rowId ? null : { nodeId, rowId },
-        )
-      } else {
-        if (pendingSource) {
-          setEdges((eds) =>
-            upsertEdge(
-              {
-                id: `e-${pendingSource}-${rowId}`,
-                source: 'json-root',
-                sourceHandle: `s-${pendingSource}`,
-                target: nodeId,
-                targetHandle: `t-${rowId}`,
-              },
-              eds,
-            ),
-          )
-          setPendingSource(null)
-        }
-        setSel((s) =>
-          s?.nodeId === nodeId && s.rowId === rowId ? null : { nodeId, rowId },
-        )
-      }
-    },
-    [pendingSource, setEdges, upsertEdge],
-  )
-
   const toggleCollapsed = useCallback((nodeId, rowId) => {
     setCollapsed((c) => {
       const s = new Set(c[nodeId] ?? [])
@@ -283,12 +252,30 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
       }
       if (e.source === 'fields') {
         if (e.sourceHandle === 's-root') return fieldsValue
-        return edgeVal(
-          eds.find(
-            (x) => x.target === 'fields' && x.targetHandle === `t-${e.sourceHandle?.slice(2)}`,
-          ),
-          depth + 1,
+        const path = e.sourceHandle?.slice(2)
+        const direct = eds.find(
+          (x) => x.target === 'fields' && x.targetHandle === `t-${path}`,
         )
+        if (direct) return edgeVal(direct, depth + 1)
+        const subtree = path
+          ?.split('.')
+          .reduce((o, k) => (o == null ? o : o[k]), fieldsValue)
+        const rebuild = (tmpl, p) => {
+          if (tmpl === null || typeof tmpl !== 'object') return tmpl
+          if (Array.isArray(tmpl))
+            return tmpl.map((el, i) => rebuild(el, p ? `${p}.${i}` : String(i)))
+          if (typeof tmpl.source === 'string') {
+            const r = edgeVal(
+              eds.find((x) => x.target === 'fields' && x.targetHandle === `t-${p}`),
+              depth + 1,
+            )
+            return { ...tmpl, source: r !== undefined ? r : tmpl.source }
+          }
+          return Object.fromEntries(
+            Object.entries(tmpl).map(([k, v]) => [k, rebuild(v, p ? `${p}.${k}` : k)]),
+          )
+        }
+        return subtree === undefined ? undefined : rebuild(subtree, path)
       }
       const tn = nodeMap[e.source]
       if (!tn) return undefined
@@ -310,9 +297,11 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         const def = INPUT_NODES[tn.data.kind] ?? INPUT_NODES.string_field
         const ins = eds.filter((x) => x.target === tn.id)
         if (!ins.length) return def.parse(paramsMap[tn.id])
-        return def.multiInput
-          ? ins.map((x) => edgeVal(x, depth + 1))
-          : def.coerce(edgeVal(ins[0], depth + 1), paramsMap[tn.id])
+        if (def.multiInput) {
+          const vals = ins.map((x) => edgeVal(x, depth + 1))
+          return def.merge?.(vals, paramsMap[tn.id]) ?? vals
+        }
+        return def.coerce(edgeVal(ins[0], depth + 1), paramsMap[tn.id])
       }
       const def = TRANSFORMS[tn.data.transformId]
       if (!def) return undefined
@@ -334,6 +323,65 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         ),
     }
   }, [])
+
+  const acceptsConnection = useCallback(
+    (conn) => {
+      const tNode = conn.target === 'fields' ? null : getNode(conn.target)
+      const def =
+        tNode?.type === 'ruleOutput' || tNode?.type === 'debugNode'
+          ? NODE_DEFS[tNode.data?.kind]
+          : null
+      const want = def?.fields?.find((f) => `t-${f.key}` === conn.targetHandle)
+        ?.type
+      if (!want || want === 'any' || !conn.source) return true
+      let src = 'any'
+      if (conn.source === 'json-root' || conn.source === 'fields') {
+        const root = conn.source === 'json-root' ? jsonData?.value : outputData
+        const path =
+          conn.sourceHandle === 's-root' ? '' : conn.sourceHandle?.slice(2)
+        const v = path
+          ? path.split('.').reduce((o, k) => (o == null ? o : o[k]), root)
+          : root
+        if (isField(v)) src = v.type
+        else if (v !== undefined && typeof v?.source !== 'string') src = typeOf(v)
+      } else {
+        const sNode = getNode(conn.source)
+        if (sNode?.type === 'stringInput')
+          src = INPUT_NODES[sNode.data?.kind]?.type ?? 'any'
+      }
+      return src === 'any' || src === want
+    },
+    [getNode, jsonData, outputData],
+  )
+
+  const handleRowClick = useCallback(
+    (nodeId, rowId) => {
+      if (nodeId === 'json-root') {
+        setPendingSource((p) => (p === rowId ? null : rowId))
+        setSel((s) =>
+          s?.nodeId === nodeId && s.rowId === rowId ? null : { nodeId, rowId },
+        )
+      } else {
+        if (pendingSource) {
+          const conn = {
+            id: `e-${pendingSource}-${rowId}`,
+            source: 'json-root',
+            sourceHandle: `s-${pendingSource}`,
+            target: nodeId,
+            targetHandle: `t-${rowId}`,
+          }
+          if (acceptsConnection(conn)) {
+            setEdges((eds) => upsertEdge(conn, eds))
+            setPendingSource(null)
+          }
+        }
+        setSel((s) =>
+          s?.nodeId === nodeId && s.rowId === rowId ? null : { nodeId, rowId },
+        )
+      }
+    },
+    [pendingSource, setEdges, upsertEdge, acceptsConnection],
+  )
 
   const insertTransform = useCallback(
     (type, edge, pos) => {
@@ -882,6 +930,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onReconnect={onReconnect}
+        isValidConnection={acceptsConnection}
         onPaneClick={onPaneClick}
         onNodeClick={onNodeClick}
         onBeforeDelete={onBeforeDelete}
