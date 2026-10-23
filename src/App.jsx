@@ -304,14 +304,15 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           )
           obj[f.key] = v === undefined ? (params[f.key] ?? f.default) : v
         }
-        return obj
+        return odef.project ? odef.project(obj, params) : obj
       }
       if (tn.type === 'stringInput') {
         const def = INPUT_NODES[tn.data.kind] ?? INPUT_NODES.string_field
-        const inEdge = eds.find((x) => x.target === tn.id)
-        return inEdge
-          ? def.coerce(edgeVal(inEdge, depth + 1), paramsMap[tn.id])
-          : def.parse(paramsMap[tn.id])
+        const ins = eds.filter((x) => x.target === tn.id)
+        if (!ins.length) return def.parse(paramsMap[tn.id])
+        return def.multiInput
+          ? ins.map((x) => edgeVal(x, depth + 1))
+          : def.coerce(edgeVal(ins[0], depth + 1), paramsMap[tn.id])
       }
       const def = TRANSFORMS[tn.data.transformId]
       if (!def) return undefined
@@ -396,6 +397,8 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           data: { kind, label: def.label },
         },
       ])
+      if (def.defaultParams)
+        setNodeParams((p) => ({ ...p, [oId]: { ...def.defaultParams } }))
     },
     [setNodes],
   )
@@ -529,7 +532,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         type: 'jsonNode',
         position: { x: 620, y: 60 },
         width: NODE_WIDTH.jsonNode,
-        data: { name: 'OUTPUT JSON', value: outputData ?? {}, rootHandle: true },
+        data: { name: 'JSON MAPPER', value: outputData ?? {}, rootHandle: true },
       },
     ]
     const edges = []
@@ -782,7 +785,9 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             fv[f.key] = v === undefined ? (data.params[f.key] ?? f.default) : v
           }
           data.fieldValues = fv
-          data.assembled = Object.fromEntries((def?.fields ?? []).map((f) => [f.key, fv[f.key]]))
+          data.assembled = def?.serialize
+            ? def.serialize(fv, data.params)
+            : Object.fromEntries((def?.fields ?? []).map((f) => [f.key, fv[f.key]]))
         }
         if (n.type === 'stringInput') {
           const def = INPUT_NODES[n.data.kind] ?? INPUT_NODES.string_field

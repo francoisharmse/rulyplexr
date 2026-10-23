@@ -1,4 +1,5 @@
-import { Box } from '@mui/material'
+import { Box, Collapse, IconButton, Typography } from '@mui/material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 
 export const truncate = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s)
 
@@ -27,6 +28,40 @@ export const monoInputStyle = (wired) => ({
   padding: '5px 8px',
   ...(wired ? { WebkitTextFillColor: '#e6e2ff' } : {}),
 })
+
+export function AssembledBar({ value, open, onToggle, accent = '#66d19e' }) {
+  return (
+    <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+      <Box sx={{ px: 1.25, py: 0.75, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Typography
+          variant="caption"
+          noWrap
+          title={typeof value === 'string' ? value : JSON.stringify(value)}
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            fontFamily: 'monospace',
+            color: value != null ? accent : 'text.disabled',
+          }}
+        >
+          {value != null ? truncate(String(value), 60) : '—'}
+        </Typography>
+        <IconButton size="small" onClick={(e) => { e.stopPropagation(); onToggle?.('__assembled') }} sx={{ p: 0, color: accent }}>
+          <ExpandMoreIcon
+            sx={{
+              fontSize: 16,
+              transform: open ? 'rotate(180deg)' : 'none',
+              transition: 'transform 150ms',
+            }}
+          />
+        </IconButton>
+      </Box>
+      <Collapse in={open}>
+        <DumpBox value={value} accent={accent} />
+      </Collapse>
+    </Box>
+  )
+}
 
 export function DumpBox({ value, accent = '#66d19e' }) {
   return (
