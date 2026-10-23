@@ -1,7 +1,9 @@
-import { Handle, Position } from '@xyflow/react'
+import { Handle, NodeResizeControl, Position } from '@xyflow/react'
 import { Box, Chip, IconButton, Typography } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
+import ContentPasteIcon from '@mui/icons-material/ContentPaste'
+import UploadFileIcon from '@mui/icons-material/UploadFile'
 
 export const TYPE_COLORS = {
   string: '#66d19e',
@@ -58,7 +60,7 @@ export function toRows(value, maxDepth = MAX_DEPTH) {
   return rows
 }
 
-function JsonNode({ data }) {
+function JsonNode({ data, selected }) {
   const { name, value } = data
   const entries = toEntries(value)
   const rows = toRows(value)
@@ -71,7 +73,8 @@ function JsonNode({ data }) {
   return (
     <Box
       sx={{
-        width: 360,
+        width: '100%',
+        minWidth: 260,
         bgcolor: 'background.paper',
         border: '1px solid',
         borderColor: data.highlighted ? '#e6e2ff' : 'primary.main',
@@ -79,6 +82,16 @@ function JsonNode({ data }) {
         borderRadius: '4px',
       }}
     >
+      {selected && (
+        <NodeResizeControl
+          position="right"
+          variant="line"
+          resizeDirection="horizontal"
+          minWidth={260}
+          color="#7c6cff"
+          style={{ width: 8, transform: 'translate(-100%, 0)' }}
+        />
+      )}
       <Box
         sx={{
           position: 'relative',
@@ -106,11 +119,41 @@ function JsonNode({ data }) {
             </Typography>
           )}
         </Typography>
-        <Chip
-          size="small"
-          label={`${rootType} · ${entries.length} ${entries.length === 1 ? 'prop' : 'props'}`}
-          sx={{ bgcolor: 'rgba(0,0,0,0.25)', color: 'inherit', height: 20 }}
-        />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+          {data.onPasteJson && (
+            <IconButton
+              size="small"
+              className="nodrag"
+              title="Paste JSON"
+              onClick={(e) => {
+                e.stopPropagation()
+                data.onPasteJson?.()
+              }}
+              sx={{ color: 'inherit', p: 0.25 }}
+            >
+              <ContentPasteIcon sx={{ fontSize: 14 }} />
+            </IconButton>
+          )}
+          {data.onBrowse && (
+            <IconButton
+              size="small"
+              className="nodrag"
+              title="Browse for a JSON file"
+              onClick={(e) => {
+                e.stopPropagation()
+                data.onBrowse?.()
+              }}
+              sx={{ color: 'inherit', p: 0.25 }}
+            >
+              <UploadFileIcon sx={{ fontSize: 15 }} />
+            </IconButton>
+          )}
+          <Chip
+            size="small"
+            label={`${rootType} · ${entries.length} ${entries.length === 1 ? 'prop' : 'props'}`}
+            sx={{ bgcolor: 'rgba(0,0,0,0.25)', color: 'inherit', height: 20 }}
+          />
+        </Box>
         {data.rootHandle && (
           <Handle
             type="source"
@@ -133,7 +176,10 @@ function JsonNode({ data }) {
             <Box
               key={row.id}
               className="nodrag"
-              onClick={() => data.onRowClick?.(row.id)}
+              onClick={(e) => {
+                e.stopPropagation()
+                data.onRowClick?.(row.id)
+              }}
               sx={{
                 position: 'relative',
                 display: 'flex',

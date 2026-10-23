@@ -21,7 +21,12 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
+  InputAdornment,
   Paper,
   Stack,
   TextField,
@@ -38,24 +43,32 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import DataObjectIcon from '@mui/icons-material/DataObject'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import JsonNode, { toEntries } from './JsonNode.jsx'
-import TransformNode from './TransformNode.jsx'
-import RuleOutputNode from './RuleOutputNode.jsx'
-import InputNode from './InputNode.jsx'
+import SearchIcon from '@mui/icons-material/Search'
+import JsonNode, { toEntries } from './nodes/input/JsonNode.jsx'
+import TransformNode from './nodes/transforms/TransformNode.jsx'
+import RuleOutputNode from './nodes/output/RuleOutputNode.jsx'
+import DebugNode from './nodes/debug/DebugNode.jsx'
+import InputNode from './nodes/input/InputNode.jsx'
 import { validateJson } from './validateJson.js'
 import sampleInputText from '../sample_json.json?raw'
 import sampleOutputText from '../sample_output.json?raw'
 
-import TRANSFORMS, { TRANSFORM_LIST } from './transforms/index.js'
-import OUTPUT_NODES, { OUTPUT_NODE_LIST, DEBUG_NODE_LIST } from './outputNodes.js'
-import INPUT_NODES, { INPUT_NODE_LIST } from './inputNodes.js'
+import TRANSFORMS, { TRANSFORM_LIST } from './nodes/transforms/index.js'
+import OUTPUT_NODES, { OUTPUT_NODE_LIST } from './nodes/output/index.js'
+import DEBUG_NODES, { DEBUG_NODE_LIST } from './nodes/debug/index.js'
+import INPUT_NODES, { INPUT_NODE_LIST } from './nodes/input/index.js'
+
+const NODE_DEFS = { ...OUTPUT_NODES, ...DEBUG_NODES }
 
 const nodeTypes = {
   jsonNode: JsonNode,
   transform: TransformNode,
   ruleOutput: RuleOutputNode,
+  debugNode: DebugNode,
   stringInput: InputNode,
 }
+
+const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, debugNode: 260, stringInput: 220 }
 
 const INPUT_TYPE_ICONS = {
   string: AbcIcon,
@@ -97,7 +110,7 @@ const EDGE_DIM_STYLE = { stroke: '#9d92ff', strokeWidth: 1.5, opacity: 0.2 }
 const EDGE_SELECTED_STYLE = { stroke: '#ffffff', strokeWidth: 3.5 }
 const EDGE_DROP_STYLE = { stroke: '#ffffff', strokeWidth: 3 }
 
-function Canvas({ jsonData, outputData, sig }) {
+function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput }) {
   const restoredRef = useRef()
   const lastBuildRef = useRef(null)
   if (restoredRef.current === undefined) restoredRef.current = loadSavedGraph(sig)
@@ -116,7 +129,9 @@ function Canvas({ jsonData, outputData, sig }) {
   const isMultiTarget = useCallback(
     (nodeId) => {
       const n = getNode(nodeId)
-      return n?.type === 'transform' && !!TRANSFORMS[n.data.transformId]?.multiInput
+      if (n?.type === 'transform') return !!TRANSFORMS[n.data.transformId]?.multiInput
+      if (n?.type === 'stringInput') return !!INPUT_NODES[n.data?.kind]?.multiInput
+      return false
     },
     [getNode],
   )
@@ -252,7 +267,7 @@ function Canvas({ jsonData, outputData, sig }) {
         setPendingSource(null)
         return
       }
-      if (node.type !== 'jsonNode') setSel({ nodeId: node.id })
+      setSel({ nodeId: node.id })
     },
     [pendingSource, setEdges, upsertEdge],
   )
@@ -277,8 +292,8 @@ function Canvas({ jsonData, outputData, sig }) {
       }
       const tn = nodeMap[e.source]
       if (!tn) return undefined
-      if (tn.type === 'ruleOutput') {
-        const odef = OUTPUT_NODES[tn.data.kind]
+      if (tn.type === 'ruleOutput' || tn.type === 'debugNode') {
+        const odef = NODE_DEFS[tn.data.kind]
         if (!odef) return undefined
         const params = paramsMap[tn.id] ?? {}
         const obj = {}
@@ -289,14 +304,15 @@ function Canvas({ jsonData, outputData, sig }) {
           )
           obj[f.key] = v === undefined ? (params[f.key] ?? f.default) : v
         }
-        return obj
+        return odef.project ? odef.project(obj, params) : obj
       }
       if (tn.type === 'stringInput') {
         const def = INPUT_NODES[tn.data.kind] ?? INPUT_NODES.string_field
-        const inEdge = eds.find((x) => x.target === tn.id)
-        return inEdge
-          ? def.coerce(edgeVal(inEdge, depth + 1))
-          : def.parse(paramsMap[tn.id])
+        const ins = eds.filter((x) => x.target === tn.id)
+        if (!ins.length) return def.parse(paramsMap[tn.id])
+        return def.multiInput
+          ? ins.map((x) => edgeVal(x, depth + 1))
+          : def.coerce(edgeVal(ins[0], depth + 1), paramsMap[tn.id])
       }
       const def = TRANSFORMS[tn.data.transformId]
       if (!def) return undefined
@@ -330,6 +346,7 @@ function Canvas({ jsonData, outputData, sig }) {
           id: tId,
           type: 'transform',
           position: { x: pos.x - 100, y: pos.y - 20 },
+          width: NODE_WIDTH.transform,
           data: { label: t.label, transformId: type },
         },
       ])
@@ -366,18 +383,22 @@ function Canvas({ jsonData, outputData, sig }) {
 
   const insertOutputNode = useCallback(
     (kind, pos) => {
-      const def = OUTPUT_NODES[kind]
+      const def = NODE_DEFS[kind]
       if (!def) return
+      const nodeType = DEBUG_NODES[kind] ? 'debugNode' : 'ruleOutput'
       const oId = `out-${++outIdRef.current}`
       setNodes((ns) => [
         ...ns,
         {
           id: oId,
-          type: 'ruleOutput',
+          type: nodeType,
           position: { x: pos.x - 130, y: pos.y - 40 },
+          width: NODE_WIDTH[nodeType],
           data: { kind, label: def.label },
         },
       ])
+      if (def.defaultParams)
+        setNodeParams((p) => ({ ...p, [oId]: { ...def.defaultParams } }))
     },
     [setNodes],
   )
@@ -393,16 +414,18 @@ function Canvas({ jsonData, outputData, sig }) {
           id: iId,
           type: 'stringInput',
           position: { x: pos.x - 110, y: pos.y - 30 },
+          width: NODE_WIDTH.stringInput,
           data: { kind, label: def.label },
         },
       ])
       setNodeParams((p) => ({
         ...p,
-        [iId]: {
-          value: Array.isArray(def.defaultValue)
-            ? [...def.defaultValue]
-            : (def.defaultValue ?? ''),
-        },
+        [iId]: Object.fromEntries(
+          Object.entries(def.defaultParams ?? {}).map(([k, v]) => [
+            k,
+            Array.isArray(v) ? [...v] : v,
+          ]),
+        ),
       }))
     },
     [setNodes],
@@ -417,7 +440,7 @@ function Canvas({ jsonData, outputData, sig }) {
           const inEs = next.filter((e) => e.target === n.id)
           const outEs = next.filter((e) => e.source === n.id)
           next = next.filter((e) => !inEs.includes(e) && !outEs.includes(e))
-          if (n.type !== 'ruleOutput' && inEs.length === 1) {
+          if (n.type !== 'ruleOutput' && n.type !== 'debugNode' && inEs.length === 1) {
             for (const outE of outEs) {
               next = addEdge(
                 {
@@ -508,7 +531,8 @@ function Canvas({ jsonData, outputData, sig }) {
         id: 'fields',
         type: 'jsonNode',
         position: { x: 620, y: 60 },
-        data: { name: 'OUTPUT JSON', value: outputData ?? {}, rootHandle: true },
+        width: NODE_WIDTH.jsonNode,
+        data: { name: 'JSON MAPPER', value: outputData ?? {}, rootHandle: true },
       },
     ]
     const edges = []
@@ -517,6 +541,7 @@ function Canvas({ jsonData, outputData, sig }) {
         id: 'json-root',
         type: 'jsonNode',
         position: { x: 60, y: 60 },
+        width: NODE_WIDTH.jsonNode,
         data: { name: 'INPUT JSON', subName: jsonData.name, value: jsonData.value },
       })
       const inputKeys = new Set(toEntries(jsonData.value).map(([k]) => k))
@@ -540,19 +565,25 @@ function Canvas({ jsonData, outputData, sig }) {
       const posMap = restored.positions ?? {}
       for (const n of nodes) if (posMap[n.id]) n.position = posMap[n.id]
       const txNodes = (restored.transforms ?? [])
-        .map((t) => ({
-          id: t.id,
-          type: t.type ?? 'transform',
-          position: t.position,
-          data: {
-            label: t.data?.label,
-            transformId: t.data?.transformId,
-            kind: t.data?.kind,
-          },
-        }))
+        .map((t) => {
+          const type = DEBUG_NODES[t.data?.kind]
+            ? 'debugNode'
+            : (t.type ?? 'transform')
+          return {
+            id: t.id,
+            type,
+            position: t.position,
+            width: t.width ?? NODE_WIDTH[type],
+            data: {
+              label: t.data?.label,
+              transformId: t.data?.transformId,
+              kind: t.data?.kind,
+            },
+          }
+        })
         .filter((t) =>
-          t.type === 'ruleOutput'
-            ? !!OUTPUT_NODES[t.data.kind]
+          t.type === 'ruleOutput' || t.type === 'debugNode'
+            ? !!NODE_DEFS[t.data.kind]
             : t.type === 'stringInput'
               ? !!INPUT_NODES[t.data.kind]
               : !!TRANSFORMS[t.data.transformId],
@@ -563,8 +594,8 @@ function Canvas({ jsonData, outputData, sig }) {
             ...t.data,
             label:
               t.data.label ??
-              (t.type === 'ruleOutput'
-                ? OUTPUT_NODES[t.data.kind]?.label
+              (t.type === 'ruleOutput' || t.type === 'debugNode'
+                ? NODE_DEFS[t.data.kind]?.label
                 : TRANSFORMS[t.data.transformId]?.label),
           },
         }))
@@ -614,7 +645,7 @@ function Canvas({ jsonData, outputData, sig }) {
     if (pendingSource) rows['json-root'].add(pendingSource)
     if (!sel) return { rows, tNodes, edgeIds }
 
-    ;(rows[sel.nodeId] ??= new Set()).add(sel.rowId)
+    if (sel.rowId) (rows[sel.nodeId] ??= new Set()).add(sel.rowId)
     const traverse = (startEdges, forward) => {
       let frontier = startEdges
       for (let i = 0; i < 12 && frontier.length; i++) {
@@ -633,9 +664,19 @@ function Canvas({ jsonData, outputData, sig }) {
       }
     }
     if (sel.nodeId === 'json-root') {
-      traverse(edges.filter((e) => e.source === 'json-root' && e.sourceHandle === `s-${sel.rowId}`), true)
+      if (sel.rowId) {
+        traverse(edges.filter((e) => e.source === 'json-root' && e.sourceHandle === `s-${sel.rowId}`), true)
+      } else {
+        tNodes.add('json-root')
+        traverse(edges.filter((e) => e.source === 'json-root'), true)
+      }
     } else if (sel.nodeId === 'fields') {
-      traverse(edges.filter((e) => e.target === 'fields' && e.targetHandle === `t-${sel.rowId}`), false)
+      if (sel.rowId) {
+        traverse(edges.filter((e) => e.target === 'fields' && e.targetHandle === `t-${sel.rowId}`), false)
+      } else {
+        tNodes.add('fields')
+        traverse(edges.filter((e) => e.target === 'fields'), false)
+      }
     } else {
       tNodes.add(sel.nodeId)
       if (sel.rowId) {
@@ -701,6 +742,10 @@ function Canvas({ jsonData, outputData, sig }) {
           collapsedIds: collapsed[n.id],
           selectedIds: [...(highlighted.rows[n.id] ?? [])],
           highlighted: highlighted.tNodes.has(n.id),
+          onBrowse:
+            n.id === 'json-root' ? onBrowseFile : n.id === 'fields' ? onBrowseOutput : undefined,
+          onPasteJson:
+            n.id === 'json-root' ? onPasteJson : n.id === 'fields' ? onPasteOutput : undefined,
         }
         if (n.id === 'fields') {
           const values = {}
@@ -728,8 +773,8 @@ function Canvas({ jsonData, outputData, sig }) {
               : def.apply(resolver.edgeVal(ins[0], 0), nodeParams[n.id])
           data.preview = out == null ? null : String(out)
         }
-        if (n.type === 'ruleOutput') {
-          const def = OUTPUT_NODES[n.data.kind]
+        if (n.type === 'ruleOutput' || n.type === 'debugNode') {
+          const def = NODE_DEFS[n.data.kind]
           data.params = nodeParams[n.id] ?? {}
           data.wired = new Set(
             edges.filter((e) => e.target === n.id).map((e) => e.targetHandle?.slice(2)),
@@ -740,19 +785,25 @@ function Canvas({ jsonData, outputData, sig }) {
             fv[f.key] = v === undefined ? (data.params[f.key] ?? f.default) : v
           }
           data.fieldValues = fv
-          data.assembled = Object.fromEntries((def?.fields ?? []).map((f) => [f.key, fv[f.key]]))
+          data.assembled = def?.serialize
+            ? def.serialize(fv, data.params)
+            : Object.fromEntries((def?.fields ?? []).map((f) => [f.key, fv[f.key]]))
         }
         if (n.type === 'stringInput') {
           const def = INPUT_NODES[n.data.kind] ?? INPUT_NODES.string_field
           data.params = nodeParams[n.id] ?? {}
-          const inEdge = edges.find((e) => e.target === n.id)
-          data.wired = !!inEdge
-          data.wiredValue = inEdge ? def.coerce(resolver.edgeVal(inEdge, 0)) : undefined
+          const ins = edges.filter((e) => e.target === n.id)
+          data.wired = ins.length > 0
+          data.wiredValue = def.multiInput
+            ? ins.map((x) => resolver.edgeVal(x, 0))
+            : ins.length
+              ? def.coerce(resolver.edgeVal(ins[0], 0), nodeParams[n.id])
+              : undefined
         }
         return { ...n, data }
       })
     })
-  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, jsonData, outputData, edges, makeResolver, nodeSig])
+  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, jsonData, outputData, edges, makeResolver, nodeSig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput])
 
   useEffect(() => {
     if (!nodes.length) return
@@ -768,6 +819,7 @@ function Canvas({ jsonData, outputData, sig }) {
               id: n.id,
               type: n.type,
               position: n.position,
+              width: n.width,
               data: { label: n.data.label, transformId: n.data.transformId, kind: n.data.kind },
             })),
           edges: edges.map(
@@ -794,6 +846,19 @@ function Canvas({ jsonData, outputData, sig }) {
       )
     } catch {}
   }, [nodes, edges, nodeParams, collapsed, sel, sig])
+
+  // Migrate nodes created before debugNode was its own type
+  useEffect(() => {
+    setNodes((ns) =>
+      ns.some((n) => n.type === 'ruleOutput' && DEBUG_NODES[n.data?.kind])
+        ? ns.map((n) =>
+            n.type === 'ruleOutput' && DEBUG_NODES[n.data?.kind]
+              ? { ...n, type: 'debugNode' }
+              : n,
+          )
+        : ns,
+    )
+  }, [setNodes])
 
   return (
     <Box
@@ -891,6 +956,7 @@ function App() {
   const [outputValidation, setOutputValidation] = useState(initial.output)
   const fileInputRef = useRef(null)
   const fileOutputRef = useRef(null)
+  const openInputPicker = useCallback(() => fileInputRef.current?.click(), [])
 
   const renderJson = useCallback(
     (text, name = 'JSON', outText = null) => {
@@ -903,6 +969,43 @@ function App() {
     },
     [outputText],
   )
+
+  const openOutputPicker = useCallback(() => fileOutputRef.current?.click(), [])
+  const [paletteFilter, setPaletteFilter] = useState('')
+  const nodeMatches = useCallback(
+    (n) => {
+      const q = paletteFilter.trim().toLowerCase()
+      if (!q) return true
+      return (
+        n.label?.toLowerCase().includes(q) ||
+        n.description?.toLowerCase().includes(q) ||
+        n.id?.toLowerCase().includes(q)
+      )
+    },
+    [paletteFilter],
+  )
+  const [pasteState, setPasteState] = useState(null)
+  const [pasteText, setPasteText] = useState('')
+  const onPasteJson = useCallback(() => {
+    setPasteText(jsonText)
+    setPasteState('input')
+  }, [jsonText])
+  const onPasteOutput = useCallback(() => {
+    setPasteText(outputText)
+    setPasteState('output')
+  }, [outputText])
+  const submitPaste = useCallback(() => {
+    if (pasteState === 'output') {
+      setOutputText(pasteText)
+      const res = validateJson(pasteText)
+      setOutputValidation(res)
+      if (res.ok) setOutputData(res.value)
+    } else {
+      setJsonText(pasteText)
+      renderJson(pasteText)
+    }
+    setPasteState(null)
+  }, [pasteState, pasteText, renderJson])
 
   const handleFile = useCallback(
     (file) => {
@@ -1017,7 +1120,7 @@ function App() {
                 variant="outlined"
                 size="small"
                 startIcon={<UploadFileIcon />}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={openInputPicker}
                 sx={{ mt: 1 }}
               >
                 Browse…
@@ -1078,7 +1181,7 @@ function App() {
                 variant="outlined"
                 size="small"
                 startIcon={<UploadFileIcon />}
-                onClick={() => fileOutputRef.current?.click()}
+                onClick={openOutputPicker}
                 sx={{ mt: 1 }}
               >
                 Browse…
@@ -1124,6 +1227,25 @@ function App() {
           </Stack>
 
           <Divider />
+          <TextField
+            size="small"
+            variant="outlined"
+            fullWidth
+            placeholder="Filter nodes…"
+            value={paletteFilter}
+            onChange={(e) => setPaletteFilter(e.target.value)}
+            slotProps={{
+              htmlInput: { style: { fontSize: 13, padding: '7px 8px' } },
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ fontSize: 18 }} />
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+          {(!!paletteFilter.trim() ? TRANSFORM_LIST.some(nodeMatches) : true) && (
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
               <Typography variant="subtitle2">Transformation nodes</Typography>
@@ -1133,7 +1255,7 @@ function App() {
                 Drag a rule onto an edge to insert it between input and output.
               </Typography>
               <Stack spacing={1}>
-              {TRANSFORM_LIST.map((t) => (
+              {TRANSFORM_LIST.filter(nodeMatches).map((t) => (
                 <Paper
                   key={t.id}
                   variant="outlined"
@@ -1165,7 +1287,9 @@ function App() {
               </Stack>
             </AccordionDetails>
           </Accordion>
+          )}
 
+          {(!!paletteFilter.trim() ? OUTPUT_NODE_LIST.some(nodeMatches) : true) && (
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
               <Typography variant="subtitle2">Output nodes</Typography>
@@ -1176,7 +1300,7 @@ function App() {
                 header connector to its field_mappings input.
               </Typography>
               <Stack spacing={1}>
-              {OUTPUT_NODE_LIST.map((o) => (
+              {OUTPUT_NODE_LIST.filter(nodeMatches).map((o) => (
                 <Paper
                   key={o.id}
                   variant="outlined"
@@ -1208,7 +1332,9 @@ function App() {
               </Stack>
             </AccordionDetails>
           </Accordion>
+          )}
 
+          {(!!paletteFilter.trim() ? INPUT_NODE_LIST.some(nodeMatches) : true) && (
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
               <Typography variant="subtitle2">Input nodes</Typography>
@@ -1218,7 +1344,7 @@ function App() {
                 Drag an input node onto the canvas — its right connector feeds other nodes.
               </Typography>
               <Stack spacing={1}>
-              {INPUT_NODE_LIST.map((o) => {
+              {INPUT_NODE_LIST.filter(nodeMatches).map((o) => {
                 const Icon = INPUT_TYPE_ICONS[o.type] ?? AbcIcon
                 return (
                 <Paper
@@ -1253,7 +1379,9 @@ function App() {
               </Stack>
             </AccordionDetails>
           </Accordion>
+          )}
 
+          {(!!paletteFilter.trim() ? DEBUG_NODE_LIST.some(nodeMatches) : true) && (
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
               <Typography variant="subtitle2">Debug nodes</Typography>
@@ -1263,7 +1391,7 @@ function App() {
                 Drag a debug node onto the canvas — its left connector takes any node output.
               </Typography>
               <Stack spacing={1}>
-              {DEBUG_NODE_LIST.map((o) => (
+              {DEBUG_NODE_LIST.filter(nodeMatches).map((o) => (
                 <Paper
                   key={o.id}
                   variant="outlined"
@@ -1295,6 +1423,7 @@ function App() {
               </Stack>
             </AccordionDetails>
           </Accordion>
+          )}
 
           <Accordion
             disableGutters
@@ -1327,10 +1456,39 @@ function App() {
         </Paper>
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Dialog open={pasteState !== null} onClose={() => setPasteState(null)} maxWidth="sm" fullWidth>
+            <DialogTitle>
+              {pasteState === 'output' ? 'Paste output structure JSON' : 'Paste JSON'}
+            </DialogTitle>
+            <DialogContent>
+              <TextField
+                multiline
+                fullWidth
+                autoFocus
+                minRows={12}
+                maxRows={20}
+                placeholder="Paste JSON here…"
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                spellCheck={false}
+                sx={MONO_TEXTFIELD_SX}
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setPasteState(null)}>Cancel</Button>
+              <Button variant="contained" onClick={submitPaste}>
+                Render node
+              </Button>
+            </DialogActions>
+          </Dialog>
           <ReactFlowProvider>
             <Canvas
               jsonData={jsonData}
               outputData={outputData}
+              onBrowseFile={openInputPicker}
+              onPasteJson={onPasteJson}
+              onBrowseOutput={openOutputPicker}
+              onPasteOutput={onPasteOutput}
               sig={hashStr(
                 JSON.stringify(jsonData?.value ?? null) +
                   '' +

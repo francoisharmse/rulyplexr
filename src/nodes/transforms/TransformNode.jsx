@@ -1,14 +1,15 @@
-import { Handle, Position } from '@xyflow/react'
+import { Handle, NodeResizeControl, Position } from '@xyflow/react'
 import { Box, TextField, Typography } from '@mui/material'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
-import TRANSFORMS from './transforms/index.js'
+import TRANSFORMS from './index.js'
 
-function TransformNode({ data }) {
+function TransformNode({ data, selected }) {
   const paramDefs = TRANSFORMS[data.transformId]?.params ?? []
   return (
     <Box
       sx={{
-        width: 200,
+        width: '100%',
+        minWidth: 140,
         bgcolor: 'background.paper',
         border: '1px solid',
         borderColor: data.highlighted ? '#e6e2ff' : '#9d92ff',
@@ -17,6 +18,16 @@ function TransformNode({ data }) {
         overflow: 'hidden',
       }}
     >
+      {selected && (
+        <NodeResizeControl
+          position="right"
+          variant="line"
+          resizeDirection="horizontal"
+          minWidth={140}
+          color="#9d92ff"
+          style={{ width: 8, transform: 'translate(-100%, 0)' }}
+        />
+      )}
       <Handle
         type="target"
         position={Position.Left}
