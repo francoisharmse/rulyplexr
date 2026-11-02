@@ -1,0 +1,599 @@
+{
+  "app": "json-node-mapper",
+  "v": 1,
+  "name": "flow",
+  "jsonText": "{\n  \"ID\": 866349049678877,\n  \"MID\": 3272,\n  \"CON\": \"M\",\n  \"TS\": 1787834040,\n  \"TSL\": 1787834010,\n  \"IMEI\": 866349049678877,\n  \"UPT\": 97826,\n  \"FWV\": [\n    1,\n    0,\n    2,\n    2610274415\n  ],\n  \"BAT\": 24242,\n  \"TEL\": 20404,\n  \"TRY\": 1,\n  \"cID\": 26358530,\n  \"CSQ\": 14,\n  \"RSRQ\": -10,\n  \"RSRP\": -108,\n  \"SNR\": 122,\n  \"IMSI\": 901405124024107,\n  \"EID\": \"89044045117727494800000642744165\",\n  \"ICCID\": \"89882280666240241079\",\n  \"MEM\": 0,\n  \"MSI\": 30,\n  \"DL\": [\n    \"\"\n  ],\n  \"URC\": [\n       {\n           \"SN\":\"MPC22L81D0055970P\",\n           \"IMEI\":866349049678877,\n           \"MAN\":\"Quectel\",\n           \"TCFW\":\"BG77LAR02A04_A0.206.A0.206\",\n           \"FCN\":6300,\n           \"PCI\":305,\n           \"REG\":5,\n           \"IP\":\"10.172.255.139\",\n           \"IMSI\":901405124024107,\n           \"ICCID\":\"89882280666240241079\"\n         }\n      ],\n  \"MIP\" : 1,\n  \"A\": [\n    4,\n    3,\n    3,\n    3,\n    3,\n    3,\n    3,\n    3,\n    0,\n    0,\n    0,\n    0,\n    0,\n    0\n  ],\n  \"T1\": [\n    295\n  ],\n  \"H1\": [\n    352\n  ],\n  \"AI1\": [\n    76\n  ],\n  \"AI2\": [\n    76\n  ],\n  \"AI3\": [\n    75\n  ],\n  \"AI4\": [\n    74\n  ],\n  \"FMC\": 0\n}",
+  "outputText": "{\n  \"timestamp\": {\n    \"type\": \"iso_time\",\n    \"source\": \"TS\"\n  },\n  \"device_status\": {\n    \"imei_number\": {\n      \"type\": \"number\",\n      \"source\": \"ID\"\n    },\n    \"lasthistorytime\": {\n      \"type\": \"iso_time\",\n      \"source\": \"TS\"\n    },\n    \"firmware_version\": {\n      \"type\": \"version\",\n      \"source\": \"FWV\"\n    },\n    \"battery_level\": {\n      \"type\": \"number\",\n      \"source\": \"BAT\",\n      \"unit\": \"mV\"\n    },\n    \"modemsignaal\": {\n      \"type\": \"number\",\n      \"source\": \"CSQ\",\n      \"unit\": \"dBm\"\n    },\n    \"signal_strength\": {\n      \"type\": \"number\",\n      \"source\": \"CSQ\",\n      \"unit\": \"dBm\"\n    }\n  },\n  \"sensors\": [\n    {\n      \"type\": \"analog_input\",\n      \"source\": \"AI1\",\n      \"unit\": \"mA\",\n      \"port\": \"an_1\",\n      \"index\": 0\n    },\n    {\n      \"type\": \"analog_input\",\n      \"source\": \"AI2\",\n      \"unit\": \"mA\",\n      \"port\": \"an_2\",\n      \"index\": 0\n    },\n    {\n      \"type\": \"analog_input\",\n      \"source\": \"AI3\",\n      \"unit\": \"bar\",\n      \"port\": \"an_3\",\n      \"index\": 0\n    },\n    {\n      \"type\": \"analog_input\",\n      \"source\": \"AI4\",\n      \"unit\": \"bar\",\n      \"port\": \"an_4\",\n      \"index\": 0\n    },\n    {\n      \"type\": \"digital_input\",\n      \"source\": \"A\",\n      \"port\": \"dig_1\",\n      \"index\": 0\n    },\n    {\n      \"type\": \"digital_input\",\n      \"source\": \"A\",\n      \"port\": \"dig_2\",\n      \"index\": 1\n    },\n    {\n      \"type\": \"digital_input\",\n      \"source\": \"A\",\n      \"port\": \"dig_3\",\n      \"index\": 2\n    },\n    {\n      \"type\": \"digital_input\",\n      \"source\": \"A\",\n      \"port\": \"dig_4\",\n      \"index\": 3\n    }\n  ]\n}",
+  "graph": {
+    "v": 1,
+    "sig": "122q86q",
+    "transforms": [
+      {
+        "id": "map-1",
+        "type": "mapperV2",
+        "position": {
+          "x": 724.6972364100001,
+          "y": -243.22023354327337
+        },
+        "width": 575,
+        "data": {
+          "label": "JSON Mapper v2",
+          "kind": "json_mapper_v2"
+        }
+      },
+      {
+        "id": "tx-10",
+        "type": "transform",
+        "position": {
+          "x": 223.15011760299302,
+          "y": -334.87909699213543
+        },
+        "width": 200,
+        "data": {
+          "label": "Transform to ISO time",
+          "transformId": "unix_to_iso"
+        }
+      },
+      {
+        "id": "tx-11",
+        "type": "transform",
+        "position": {
+          "x": 226.11350007630767,
+          "y": -102.19756864492663
+        },
+        "width": 200,
+        "data": {
+          "label": "Combine fields",
+          "transformId": "combine"
+        }
+      },
+      {
+        "id": "out-7",
+        "type": "ruleOutput",
+        "position": {
+          "x": 1380.4020770861157,
+          "y": -449.40716713074124
+        },
+        "width": 563,
+        "data": {
+          "label": "IoT Rule Output",
+          "kind": "iot_rule"
+        }
+      },
+      {
+        "id": "in-8",
+        "type": "stringInput",
+        "position": {
+          "x": 722.15560614174,
+          "y": -486.2848342543363
+        },
+        "width": 220,
+        "data": {
+          "label": "String field",
+          "kind": "string_field"
+        }
+      },
+      {
+        "id": "in-9",
+        "type": "stringInput",
+        "position": {
+          "x": 722.4680192976127,
+          "y": -400.3670748383696
+        },
+        "width": 220,
+        "data": {
+          "label": "Array field",
+          "kind": "array_field"
+        }
+      },
+      {
+        "id": "tx-12",
+        "type": "transform",
+        "position": {
+          "x": 1042.7623800726853,
+          "y": -464.4585941566777
+        },
+        "width": 200,
+        "data": {
+          "label": "To lower case",
+          "transformId": "to_lower_case"
+        }
+      },
+      {
+        "id": "tx-13",
+        "type": "transform",
+        "position": {
+          "x": 1042.1558312626346,
+          "y": -350.9189849657087
+        },
+        "width": 200,
+        "data": {
+          "label": "To lower case",
+          "transformId": "to_lower_case"
+        }
+      },
+      {
+        "id": "out-8",
+        "type": "ruleOutput",
+        "position": {
+          "x": 2004.6123628813957,
+          "y": -412.6912144256445
+        },
+        "width": 462,
+        "data": {
+          "label": "To JSON",
+          "kind": "to_json"
+        }
+      },
+      {
+        "id": "out-9",
+        "type": "debugNode",
+        "position": {
+          "x": 1380.3951068545143,
+          "y": -28.038381529810476
+        },
+        "width": 260,
+        "data": {
+          "label": "DEBUG Output",
+          "kind": "debug_out"
+        }
+      },
+      {
+        "id": "tx-14",
+        "type": "transform",
+        "position": {
+          "x": 227.06143198561097,
+          "y": -177.19969767203975
+        },
+        "width": 200,
+        "data": {
+          "label": "Transform to ISO time",
+          "transformId": "unix_to_iso"
+        }
+      },
+      {
+        "id": "tx-15",
+        "type": "transform",
+        "position": {
+          "x": 247.85661350594,
+          "y": 195.62173747944314
+        },
+        "width": 200,
+        "data": {
+          "label": "Array element",
+          "transformId": "array_element"
+        }
+      },
+      {
+        "id": "tx-16",
+        "type": "transform",
+        "position": {
+          "x": 255.6017089104555,
+          "y": 646.3712561402849
+        },
+        "width": 200,
+        "data": {
+          "label": "Array element",
+          "transformId": "array_element"
+        }
+      },
+      {
+        "id": "tx-17",
+        "type": "transform",
+        "position": {
+          "x": 256.7649460223198,
+          "y": 746.2647514115282
+        },
+        "width": 200,
+        "data": {
+          "label": "Array element",
+          "transformId": "array_element"
+        }
+      },
+      {
+        "id": "tx-18",
+        "type": "transform",
+        "position": {
+          "x": 256.7649460223198,
+          "y": 845.2427898400339
+        },
+        "width": 200,
+        "data": {
+          "label": "Array element",
+          "transformId": "array_element"
+        }
+      },
+      {
+        "id": "tx-19",
+        "type": "transform",
+        "position": {
+          "x": 256.65243317581957,
+          "y": 946.6684424785512
+        },
+        "width": 200,
+        "data": {
+          "label": "Array element",
+          "transformId": "array_element"
+        }
+      },
+      {
+        "id": "tx-20",
+        "type": "transform",
+        "position": {
+          "x": 247.8405884294039,
+          "y": 294.94865247804535
+        },
+        "width": 200,
+        "data": {
+          "label": "Array element",
+          "transformId": "array_element"
+        }
+      },
+      {
+        "id": "tx-21",
+        "type": "transform",
+        "position": {
+          "x": 246.80801750687982,
+          "y": 394.87186195492865
+        },
+        "width": 200,
+        "data": {
+          "label": "Array element",
+          "transformId": "array_element"
+        }
+      },
+      {
+        "id": "tx-22",
+        "type": "transform",
+        "position": {
+          "x": 247.8405884294039,
+          "y": 494.79507143181183
+        },
+        "width": 200,
+        "data": {
+          "label": "Array element",
+          "transformId": "array_element"
+        }
+      },
+      {
+        "id": "tx-23",
+        "type": "transform",
+        "position": {
+          "x": 230.7830365107601,
+          "y": 53.137472557943084
+        },
+        "width": 200,
+        "data": {
+          "label": "CSQ → dBm",
+          "transformId": "csq_to_dbm"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-BAT-map-1-device_status.battery_level",
+        "source": "json-root",
+        "sourceHandle": "s-BAT",
+        "target": "map-1",
+        "targetHandle": "t-device_status.battery_level"
+      },
+      {
+        "id": "e-ID-device_status.imei_number",
+        "source": "json-root",
+        "sourceHandle": "s-ID",
+        "target": "map-1",
+        "targetHandle": "t-device_status.imei_number"
+      },
+      {
+        "id": "e-TS-tx-10",
+        "source": "json-root",
+        "sourceHandle": "s-TS",
+        "target": "tx-10",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-10-timestamp",
+        "source": "tx-10",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-timestamp"
+      },
+      {
+        "id": "e-FWV-tx-11",
+        "source": "json-root",
+        "sourceHandle": "s-FWV",
+        "target": "tx-11",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-11-device_status.firmware_version",
+        "source": "tx-11",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-device_status.firmware_version"
+      },
+      {
+        "id": "xy-edge__map-1s-root-out-7t-field_mappings",
+        "source": "map-1",
+        "sourceHandle": "s-root",
+        "target": "out-7",
+        "targetHandle": "t-field_mappings"
+      },
+      {
+        "id": "e-t-tx-12",
+        "source": "in-8",
+        "sourceHandle": "out",
+        "target": "tx-12",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-12-vendor",
+        "source": "tx-12",
+        "sourceHandle": "out",
+        "target": "out-7",
+        "targetHandle": "t-vendor"
+      },
+      {
+        "id": "e-t-tx-13",
+        "source": "in-9",
+        "sourceHandle": "out",
+        "target": "tx-13",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-13-rtu_types",
+        "source": "tx-13",
+        "sourceHandle": "out",
+        "target": "out-7",
+        "targetHandle": "t-rtu_types"
+      },
+      {
+        "id": "xy-edge__out-7out-out-8t-value",
+        "source": "out-7",
+        "sourceHandle": "out",
+        "target": "out-8",
+        "targetHandle": "t-value"
+      },
+      {
+        "id": "xy-edge__map-1s-root-out-9t-value",
+        "source": "map-1",
+        "sourceHandle": "s-root",
+        "target": "out-9",
+        "targetHandle": "t-value"
+      },
+      {
+        "id": "e-TSL-tx-14",
+        "source": "json-root",
+        "sourceHandle": "s-TSL",
+        "target": "tx-14",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-14-device_status.lasthistorytime",
+        "source": "tx-14",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-device_status.lasthistorytime"
+      },
+      {
+        "id": "e-A-tx-15",
+        "source": "json-root",
+        "sourceHandle": "s-A",
+        "target": "tx-15",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-15-sensors.4",
+        "source": "tx-15",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-sensors.4"
+      },
+      {
+        "id": "e-AI1-tx-16",
+        "source": "json-root",
+        "sourceHandle": "s-AI1",
+        "target": "tx-16",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-16-sensors.0",
+        "source": "tx-16",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-sensors.0"
+      },
+      {
+        "id": "e-tx-17-sensors.1",
+        "source": "tx-17",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-sensors.1"
+      },
+      {
+        "id": "xy-edge__json-roots-AI2-tx-17in",
+        "source": "json-root",
+        "sourceHandle": "s-AI2",
+        "target": "tx-17",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-18-sensors.2",
+        "source": "tx-18",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-sensors.2"
+      },
+      {
+        "id": "xy-edge__json-roots-AI3-tx-18in",
+        "source": "json-root",
+        "sourceHandle": "s-AI3",
+        "target": "tx-18",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-19-sensors.3",
+        "source": "tx-19",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-sensors.3"
+      },
+      {
+        "id": "xy-edge__json-roots-AI4-tx-19in",
+        "source": "json-root",
+        "sourceHandle": "s-AI4",
+        "target": "tx-19",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-20-sensors.5",
+        "source": "tx-20",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-sensors.5"
+      },
+      {
+        "id": "xy-edge__json-roots-A-tx-20in",
+        "source": "json-root",
+        "sourceHandle": "s-A",
+        "target": "tx-20",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-21-sensors.6",
+        "source": "tx-21",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-sensors.6"
+      },
+      {
+        "id": "xy-edge__json-roots-A-tx-21in",
+        "source": "json-root",
+        "sourceHandle": "s-A",
+        "target": "tx-21",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-tx-22-sensors.7",
+        "source": "tx-22",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-sensors.7"
+      },
+      {
+        "id": "xy-edge__json-roots-A-tx-22in",
+        "source": "json-root",
+        "sourceHandle": "s-A",
+        "target": "tx-22",
+        "targetHandle": "in"
+      },
+      {
+        "id": "xy-edge__json-roots-CSQ-tx-23in",
+        "source": "json-root",
+        "sourceHandle": "s-CSQ",
+        "target": "tx-23",
+        "targetHandle": "in"
+      },
+      {
+        "id": "xy-edge__tx-23out-map-1t-device_status.modemsignaal",
+        "source": "tx-23",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-device_status.modemsignaal"
+      },
+      {
+        "id": "xy-edge__tx-23out-map-1t-device_status.signal_strength",
+        "source": "tx-23",
+        "sourceHandle": "out",
+        "target": "map-1",
+        "targetHandle": "t-device_status.signal_strength"
+      }
+    ],
+    "sel": null,
+    "positions": {
+      "json-root": {
+        "x": -223.16097864245353,
+        "y": -295.9359387131611
+      }
+    },
+    "fieldsRemoved": true,
+    "nodeParams": {
+      "tx-11": {
+        "separator": "."
+      },
+      "in-8": {
+        "value": "CREST"
+      },
+      "in-9": {
+        "value": [
+          "meetpunt",
+          "MEETPUT"
+        ]
+      },
+      "out-8": {
+        "indent": "2",
+        "sortKeys": true,
+        "ensureAscii": false
+      },
+      "tx-15": {
+        "index": "0"
+      },
+      "tx-16": {
+        "index": "0"
+      },
+      "tx-17": {
+        "index": "0"
+      },
+      "tx-18": {
+        "index": "0"
+      },
+      "tx-19": {
+        "index": "0"
+      },
+      "tx-20": {
+        "index": "1"
+      },
+      "tx-21": {
+        "index": "2"
+      },
+      "tx-22": {
+        "index": "3"
+      }
+    },
+    "collapsed": {
+      "json-root": [
+        "T1",
+        "H1",
+        "DL",
+        "URC",
+        "FWV",
+        "AI1",
+        "AI2",
+        "AI3",
+        "AI4",
+        "A"
+      ],
+      "out-1": [
+        "__assembled"
+      ],
+      "out-2": [
+        "value"
+      ],
+      "out-3": [
+        "field_mappings"
+      ],
+      "out-6": [
+        "__assembled"
+      ],
+      "out-5": [
+        "__assembled"
+      ],
+      "out-7": [
+        "__assembled"
+      ],
+      "out-8": [
+        "__assembled"
+      ]
+    }
+  }
+}

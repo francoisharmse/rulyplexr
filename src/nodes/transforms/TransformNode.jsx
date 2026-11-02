@@ -1,6 +1,7 @@
 import { Handle, NodeResizeControl, Position } from '@xyflow/react'
 import { Box, TextField, Typography } from '@mui/material'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import RenameTitle from '../RenameTitle.jsx'
 import TRANSFORMS from './index.js'
 
 function TransformNode({ data, selected }) {
@@ -46,9 +47,11 @@ function TransformNode({ data, selected }) {
         }}
       >
         <AutoFixHighIcon sx={{ fontSize: 14 }} />
-        <Typography variant="caption" sx={{ fontWeight: 700 }}>
-          {data.label}
-        </Typography>
+        <RenameTitle
+          value={data.label}
+          onRename={data.onRename}
+          sx={{ fontWeight: 700 }}
+        />
       </Box>
       {paramDefs.length > 0 && (
         <Box

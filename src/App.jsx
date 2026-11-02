@@ -28,13 +28,13 @@ import {
   DialogTitle,
   Divider,
   InputAdornment,
+  MenuItem,
   Paper,
   Stack,
   TextField,
   Toolbar,
   Typography,
 } from '@mui/material'
-import UploadFileIcon from '@mui/icons-material/UploadFile'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import AbcIcon from '@mui/icons-material/Abc'
 import NumbersIcon from '@mui/icons-material/Numbers'
@@ -43,6 +43,11 @@ import DataArrayIcon from '@mui/icons-material/DataArray'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import DataObjectIcon from '@mui/icons-material/DataObject'
 import BugReportIcon from '@mui/icons-material/BugReport'
+import NoteAddIcon from '@mui/icons-material/NoteAdd'
+import SaveIcon from '@mui/icons-material/Save'
+import SaveAsIcon from '@mui/icons-material/SaveAs'
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import { parse as yamlParse, stringify as yamlStringify } from 'yaml'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import SearchIcon from '@mui/icons-material/Search'
 import JsonNode, { toEntries, toRows, typeOf, isField } from './nodes/core/JsonNode.jsx'
@@ -65,6 +70,7 @@ const NODE_DEFS = { ...OUTPUT_NODES, ...DEBUG_NODES }
 
 const nodeTypes = {
   jsonNode: JsonNode,
+  inputJson: JsonNode,
   transform: TransformNode,
   ruleOutput: RuleOutputNode,
   debugNode: DebugNode,
@@ -73,7 +79,19 @@ const nodeTypes = {
   mapperV2: MapperV2Node,
 }
 
-const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, debugNode: 260, stringInput: 220, mapperV1: 360, mapperV2: 360 }
+const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, debugNode: 260, stringInput: 220, mapperV1: 360, mapperV2: 360, inputJson: 360 }
+
+const stripEmptySource = (v) => {
+  if (Array.isArray(v)) return v.map(stripEmptySource)
+  if (v !== null && typeof v === 'object') {
+    const out = {}
+    for (const [k, x] of Object.entries(v))
+      if (!(k === 'source' && typeof x === 'string' && !x.trim()))
+        out[k] = stripEmptySource(x)
+    return out
+  }
+  return v
+}
 
 const JSON_TYPE_NAMES = new Set(['string', 'number', 'boolean', 'array', 'object', 'null'])
 const capFieldType = (t) => t[0].toUpperCase() + t.slice(1)
@@ -91,7 +109,9 @@ const projectMapperFields = (tmpl, path, resolveLeaf) => {
         : rv !== undefined
           ? typeOf(rv)
           : 'string'
-      return { ...tmpl, Field_Type: capFieldType(ft), Unit: tmpl.unit ?? '' }
+      const projected = { ...tmpl, Field_Type: capFieldType(ft), Unit: tmpl.unit ?? '' }
+      delete projected.source
+      return projected
     }
     return Object.fromEntries(
       Object.entries(tmpl).map(([k, x]) => [
@@ -143,7 +163,7 @@ const EDGE_DIM_STYLE = { stroke: '#9d92ff', strokeWidth: 1.5, opacity: 0.2 }
 const EDGE_SELECTED_STYLE = { stroke: '#ffffff', strokeWidth: 3.5 }
 const EDGE_DROP_STYLE = { stroke: '#ffffff', strokeWidth: 3 }
 
-function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput, onUpdateOutput }) {
+function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput, onUpdateOutput, onBrowseNodeInput, onPasteNodeInput, apiRef }) {
   const restoredRef = useRef()
   const lastBuildRef = useRef(null)
   const didInitFitRef = useRef(false)
@@ -153,6 +173,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
   const [pendingSource, setPendingSource] = useState(null)
   const [sel, setSel] = useState(null)
   const [dropEdgeId, setDropEdgeId] = useState(null)
+  const [restoreTick, setRestoreTick] = useState(0)
   const [collapsed, setCollapsed] = useState({})
   const [nodeParams, setNodeParams] = useState({})
   const txIdRef = useRef(0)
@@ -265,9 +286,9 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         setEdges((eds) =>
           upsertEdge(
             {
-              id: `e-${pendingSource}-${node.id}`,
-              source: 'json-root',
-              sourceHandle: `s-${pendingSource}`,
+              id: `e-${pendingSource.node}-${pendingSource.row}-${node.id}`,
+              source: pendingSource.node,
+              sourceHandle: `s-${pendingSource.row}`,
               target: node.id,
               targetHandle: 'in',
             },
@@ -285,13 +306,22 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
   const makeResolver = useCallback((eds, inputObj, nodeMap, paramsMap, fieldsValue) => {
     const edgeVal = (e, depth) => {
       if (!e || depth > 12) return undefined
-      if (e.source === 'json-root') {
-        return e.sourceHandle
-          ?.slice(2)
-          .split('.')
+      const tn = nodeMap[e.source]
+      if (e.source === 'json-root' || tn?.type === 'inputJson') {
+        const path = e.sourceHandle?.slice(2)
+        if (tn?.type === 'inputJson') {
+          const feed = eds.find(
+            (x) => x.target === e.source && x.targetHandle === `t-${path}`,
+          )
+          if (feed) return edgeVal(feed, depth + 1)
+          return path
+            ?.split('.')
+            .reduce((o, k) => (o == null ? o : o[k]), paramsMap[e.source]?.value)
+        }
+        return path
+          ?.split('.')
           .reduce((o, k) => (o == null ? o : o[k]), inputObj)
       }
-      const tn = nodeMap[e.source]
       const mapperType =
         e.source === 'fields' ? 'mapperV1' : MAPPER_TYPES.has(tn?.type) ? tn.type : null
       if (mapperType) {
@@ -312,7 +342,12 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           if (t === null || typeof t !== 'object') return t
           if (Array.isArray(t))
             return t.map((el, i) => rebuild(el, p ? `${p}.${i}` : String(i)))
-          if (typeof t.source === 'string') {
+          if (isField(t) && t.type !== 'object' && t.type !== 'array') {
+            if (mapperType === 'mapperV2') {
+              const out = { ...t }
+              delete out.source
+              return out
+            }
             const r = edgeVal(leafEdge(p), depth + 1)
             return { ...t, source: r !== undefined ? r : t.source }
           }
@@ -379,8 +414,18 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         ?.type
       if (!want || want === 'any' || !conn.source) return true
       let src = 'any'
-      if (conn.source === 'json-root' || conn.source === 'fields') {
-        const root = conn.source === 'json-root' ? jsonData?.value : outputData
+      const sNode = getNode(conn.source)
+      if (
+        conn.source === 'json-root' ||
+        conn.source === 'fields' ||
+        sNode?.type === 'inputJson'
+      ) {
+        const root =
+          conn.source === 'fields'
+            ? outputData
+            : sNode?.type === 'inputJson'
+              ? nodeParams[conn.source]?.value
+              : jsonData?.value
         const path =
           conn.sourceHandle === 's-root' ? '' : conn.sourceHandle?.slice(2)
         const v = path
@@ -388,29 +433,32 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           : root
         if (isField(v)) src = v.type
         else if (v !== undefined && typeof v?.source !== 'string') src = typeOf(v)
-      } else {
-        const sNode = getNode(conn.source)
-        if (sNode?.type === 'stringInput')
-          src = INPUT_NODES[sNode.data?.kind]?.type ?? 'any'
+      } else if (sNode?.type === 'stringInput') {
+        src = INPUT_NODES[sNode.data?.kind]?.type ?? 'any'
       }
       return src === 'any' || src === want
     },
-    [getNode, jsonData, outputData],
+    [getNode, jsonData, outputData, nodeParams],
   )
 
   const handleRowClick = useCallback(
     (nodeId, rowId) => {
-      if (nodeId === 'json-root') {
-        setPendingSource((p) => (p === rowId ? null : rowId))
+      const srcNode = getNode(nodeId)
+      if (nodeId === 'json-root' || srcNode?.type === 'inputJson') {
+        setPendingSource((p) =>
+          p?.node === nodeId && p?.row === rowId
+            ? null
+            : { node: nodeId, row: rowId },
+        )
         setSel((s) =>
           s?.nodeId === nodeId && s.rowId === rowId ? null : { nodeId, rowId },
         )
       } else {
         if (pendingSource) {
           const conn = {
-            id: `e-${pendingSource}-${rowId}`,
-            source: 'json-root',
-            sourceHandle: `s-${pendingSource}`,
+            id: `e-${pendingSource.node}-${pendingSource.row}-${rowId}`,
+            source: pendingSource.node,
+            sourceHandle: `s-${pendingSource.row}`,
             target: nodeId,
             targetHandle: `t-${rowId}`,
           }
@@ -424,7 +472,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         )
       }
     },
-    [pendingSource, setEdges, upsertEdge, acceptsConnection],
+    [pendingSource, setEdges, upsertEdge, acceptsConnection, getNode],
   )
 
   const insertTransform = useCallback(
@@ -539,30 +587,40 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             kind,
             label: def.label,
             name: def.label.toUpperCase(),
-            value: outputData ?? {},
-            rootHandle: true,
+            value:
+              def.nodeType === 'inputJson' ? {} : (outputData ?? {}),
+            subName: def.nodeType === 'inputJson' ? jsonData?.name : undefined,
+            rootHandle: def.nodeType !== 'inputJson',
           },
         },
       ])
-      if (jsonData && outputData) {
-        const inputKeys = new Set(toEntries(jsonData.value).map(([k]) => k))
-        setEdges((eds) => [
-          ...eds,
-          ...collectSources(outputData)
-            .filter((m) => inputKeys.has(m.source))
-            .map((m) => ({
-              id: `e-${m.source}-${mId}-${m.path}`,
-              source: 'json-root',
+      if (def.nodeType !== 'inputJson' && outputData) {
+        const live = getNodes()
+        const newEdges = []
+        for (const s of live.filter(
+          (n) => n.id === 'json-root' || n.type === 'inputJson',
+        )) {
+          const srcVal =
+            s.id === 'json-root' ? jsonData?.value : nodeParams[s.id]?.value
+          if (!srcVal) continue
+          const keys = new Set(toEntries(srcVal).map(([k]) => k))
+          for (const m of collectSources(outputData).filter((m) =>
+            keys.has(m.source),
+          ))
+            newEdges.push({
+              id: `e-${s.id}-${m.source}-${mId}-${m.path}`,
+              source: s.id,
               sourceHandle: `s-${m.source}`,
               target: mId,
               targetHandle: `t-${m.path}`,
               reconnectable: true,
               style: EDGE_STYLE,
-            })),
-        ])
+            })
+        }
+        if (newEdges.length) setEdges((eds) => [...eds, ...newEdges])
       }
     },
-    [setNodes, setEdges, jsonData, outputData],
+    [setNodes, setEdges, jsonData, outputData, getNodes, nodeParams],
   )
 
   const onBeforeDelete = useCallback(
@@ -679,29 +737,6 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           },
         ]
     const edges = []
-    if (jsonData) {
-      nodes.unshift({
-        id: 'json-root',
-        type: 'jsonNode',
-        position: { x: 60, y: 60 },
-        width: NODE_WIDTH.jsonNode,
-        data: { name: 'INPUT JSON', subName: jsonData.name, value: jsonData.value },
-      })
-      const inputKeys = new Set(toEntries(jsonData.value).map(([k]) => k))
-      for (const m of outputData && !fieldsRemovedRef.current ? collectSources(outputData) : []) {
-        if (inputKeys.has(m.source)) {
-          edges.push({
-            id: `e-${m.source}-${m.path}`,
-            source: 'json-root',
-            sourceHandle: `s-${m.source}`,
-            target: 'fields',
-            targetHandle: `t-${m.path}`,
-            reconnectable: true,
-            style: EDGE_STYLE,
-          })
-        }
-      }
-    }
     const restored = restoredRef.current
     restoredRef.current = null
     if (restored) {
@@ -729,7 +764,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             ? !!NODE_DEFS[t.data.kind]
             : t.type === 'stringInput'
               ? !!INPUT_NODES[t.data.kind]
-              : MAPPER_TYPES.has(t.type)
+              : MAPPER_TYPES.has(t.type) || t.type === 'inputJson'
                 ? !!CORE_NODES[t.data.kind]
                 : !!TRANSFORMS[t.data.transformId],
         )
@@ -760,13 +795,36 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         0,
         ...txNodes.map((t) => Number(/^map-(\d+)$/.exec(t.id)?.[1]) || 0),
       )
+      const migratedParams = {}
+      if (
+        (restored.edges ?? []).some(
+          (e) => e.source === 'json-root' || e.target === 'json-root',
+        )
+      ) {
+        const nid = `map-${++mapIdRef.current}`
+        txNodes.push({
+          id: nid,
+          type: 'inputJson',
+          position: posMap['json-root'] ?? { x: 60, y: 60 },
+          width: NODE_WIDTH.inputJson,
+          data: {
+            kind: 'input_json',
+            label: 'INPUT JSON',
+            name: 'INPUT JSON',
+          },
+        })
+        migratedParams[nid] = { value: jsonData?.value ?? {} }
+        for (const e of restored.edges) {
+          if (e.source === 'json-root') e.source = nid
+          if (e.target === 'json-root') e.target = nid
+        }
+      }
       setNodes([...nodes, ...txNodes])
-      setEdges(
-        (restored.edges ?? [])
-          .filter((e) => e.id && e.source && e.target)
-          .map((e) => ({ ...e, style: EDGE_STYLE, reconnectable: true })),
-      )
-      setNodeParams(restored.nodeParams ?? {})
+      const restoredEdges = (restored.edges ?? [])
+        .filter((e) => e.id && e.source && e.target)
+        .map((e) => ({ ...e, style: EDGE_STYLE, reconnectable: true }))
+      requestAnimationFrame(() => setEdges(restoredEdges))
+      setNodeParams({ ...(restored.nodeParams ?? {}), ...migratedParams })
       setCollapsed(
         Object.fromEntries(
           Object.entries(restored.collapsed ?? {}).map(([k, v]) => [k, new Set(v)]),
@@ -787,18 +845,31 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
     const validMapperTargets = new Set(
       toRows(outputData ?? {}).map((r) => `t-${r.id}`),
     )
-    setEdges((prev) => [
-      ...edges,
-      ...prev.filter(
+    setEdges((prev) => {
+      const kept = prev.filter(
         (e) =>
-          !(e.source === 'json-root' && e.target === 'fields') &&
           !(
-            (e.target === 'fields' || e.target.startsWith('map-')) &&
+            (e.target === 'fields' ||
+              MAPPER_TYPES.has(getNode(e.target)?.type)) &&
             e.targetHandle?.startsWith('t-') &&
             !validMapperTargets.has(e.targetHandle)
           ),
-      ),
-    ])
+      )
+      const have = new Set(
+        kept.map(
+          (e) => `${e.source}|${e.sourceHandle}|${e.target}|${e.targetHandle}`,
+        ),
+      )
+      return [
+        ...kept,
+        ...edges.filter(
+          (e) =>
+            !have.has(
+              `${e.source}|${e.sourceHandle}|${e.target}|${e.targetHandle}`,
+            ),
+        ),
+      ]
+    })
     if (!didInitFitRef.current) {
       didInitFitRef.current = true
       setPendingSource(null)
@@ -806,13 +877,14 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
       setCollapsed({})
       requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }))
     }
-  }, [jsonData, outputData, setNodes, setEdges, fitView])
+  }, [jsonData, outputData, setNodes, setEdges, fitView, restoreTick, getNode])
 
   const highlighted = useMemo(() => {
     const rows = { 'json-root': new Set(), fields: new Set() }
     const tNodes = new Set()
     const edgeIds = new Set()
-    if (pendingSource) rows['json-root'].add(pendingSource)
+    if (pendingSource)
+      (rows[pendingSource.node] ??= new Set()).add(pendingSource.row)
     if (!sel) return { rows, tNodes, edgeIds }
 
     if (sel.rowId) (rows[sel.nodeId] ??= new Set()).add(sel.rowId)
@@ -824,7 +896,8 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           edgeIds.add(e.id)
           const nxt = forward ? e.target : e.source
           if (nxt === 'fields') rows.fields.add(e.targetHandle?.slice(2))
-          else if (nxt === 'json-root') rows['json-root'].add(e.sourceHandle?.slice(2))
+          else if (nxt === 'json-root' || getNode(nxt)?.type === 'inputJson')
+            (rows[nxt] ??= new Set()).add(e.sourceHandle?.slice(2))
           else {
             tNodes.add(nxt)
             if (MAPPER_TYPES.has(getNode(nxt)?.type))
@@ -837,12 +910,12 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         frontier = next
       }
     }
-    if (sel.nodeId === 'json-root') {
+    if (sel.nodeId === 'json-root' || getNode(sel.nodeId)?.type === 'inputJson') {
       if (sel.rowId) {
-        traverse(edges.filter((e) => e.source === 'json-root' && e.sourceHandle === `s-${sel.rowId}`), true)
+        traverse(edges.filter((e) => e.source === sel.nodeId && e.sourceHandle === `s-${sel.rowId}`), true)
       } else {
-        tNodes.add('json-root')
-        traverse(edges.filter((e) => e.source === 'json-root'), true)
+        tNodes.add(sel.nodeId)
+        traverse(edges.filter((e) => e.source === sel.nodeId), true)
       }
     } else if (sel.nodeId === 'fields') {
       if (sel.rowId) {
@@ -867,7 +940,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
       }
     }
     return { rows, tNodes, edgeIds }
-  }, [sel, pendingSource, edges])
+  }, [sel, pendingSource, edges, getNode])
 
   const displayEdges = useMemo(() => {
     const remap = (handle, nodeId, prefix) => {
@@ -925,9 +998,34 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           selectedIds: [...(highlighted.rows[n.id] ?? [])],
           highlighted: highlighted.tNodes.has(n.id),
           onBrowse:
-            n.id === 'json-root' ? onBrowseFile : n.id === 'fields' || MAPPER_TYPES.has(n.type) ? onBrowseOutput : undefined,
+            n.type === 'inputJson'
+              ? () => onBrowseNodeInput?.(n.id)
+              : n.id === 'json-root'
+                ? onBrowseFile
+                : n.id === 'fields' || MAPPER_TYPES.has(n.type)
+                  ? onBrowseOutput
+                  : undefined,
           onPasteJson:
-            n.id === 'json-root' ? onPasteJson : n.id === 'fields' || MAPPER_TYPES.has(n.type) ? onPasteOutput : undefined,
+            n.type === 'inputJson'
+              ? () => onPasteNodeInput?.(n.id)
+              : n.id === 'json-root'
+                ? onPasteJson
+                : n.id === 'fields' || MAPPER_TYPES.has(n.type)
+                  ? onPasteOutput
+                  : undefined,
+        }
+        if (n.type === 'inputJson') {
+          data.value = nodeParams[n.id]?.value ?? {}
+          data.name = 'INPUT JSON'
+          data.subName = jsonData?.name
+          const values = {}
+          for (const e of edges) {
+            if (e.target === n.id && e.targetHandle) {
+              const v = resolver.at(n.id, e.targetHandle)
+              if (v !== undefined) values[e.targetHandle.slice(2)] = v
+            }
+          }
+          data.values = values
         }
         if (n.id === 'fields' || MAPPER_TYPES.has(n.type)) {
           data.value = outputData ?? {}
@@ -956,8 +1054,10 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             }
             if (f.unit) upd.unit = f.unit
             else delete upd.unit
-            if (f.source) upd.source = f.source
-            else delete upd.source
+            if (f.source !== undefined) {
+              if (f.source) upd.source = f.source
+              else delete upd.source
+            }
             if (Array.isArray(parent)) {
               parent[Number(key)] = upd
             } else {
@@ -1062,10 +1162,16 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
                   h && (h.startsWith('t-') || h.startsWith('s-'))
                     ? `${h.slice(0, 2)}${remapPath(h.slice(2))}`
                     : h
+                const isStruct = (id) =>
+                  id === 'fields' || MAPPER_TYPES.has(getNode(id)?.type)
                 setEdges((es) =>
                   es.map((e) => {
-                    const sourceHandle = remapHandle(e.sourceHandle)
-                    const targetHandle = remapHandle(e.targetHandle)
+                    const sourceHandle = isStruct(e.source)
+                      ? remapHandle(e.sourceHandle)
+                      : e.sourceHandle
+                    const targetHandle = isStruct(e.target)
+                      ? remapHandle(e.targetHandle)
+                      : e.targetHandle
                     return sourceHandle === e.sourceHandle &&
                       targetHandle === e.targetHandle
                       ? e
@@ -1083,7 +1189,9 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
                 setSel((s) =>
                   s?.rowId ? { ...s, rowId: remapPath(s.rowId) } : s,
                 )
-                setPendingSource((p) => (p ? remapPath(p) : p))
+                setPendingSource((p) =>
+                  p ? { ...p, row: remapPath(p.row) } : p,
+                )
               }
             } else {
               const entries = Object.entries(parent)
@@ -1145,53 +1253,81 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
               ? def.coerce(resolver.edgeVal(ins[0], 0), nodeParams[n.id])
               : undefined
         }
+        const customName = nodeParams[n.id]?.name
+        if (customName) {
+          data.name = customName
+          data.label = customName
+        }
+        data.onRename = (name) => setParam(n.id, 'name', name || undefined)
         return { ...n, data }
       })
     })
-  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, setEdges, setSel, setCollapsed, setPendingSource, jsonData, outputData, edges, makeResolver, nodeSig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput, onUpdateOutput, getNodes, updateNodeInternals])
+  }, [highlighted, handleRowClick, toggleCollapsed, setParam, collapsed, nodeParams, setNodes, setEdges, setSel, setCollapsed, setPendingSource, jsonData, outputData, edges, makeResolver, nodeSig, onBrowseFile, onPasteJson, onBrowseOutput, onPasteOutput, onUpdateOutput, onBrowseNodeInput, onPasteNodeInput, getNodes, updateNodeInternals])
+
+  const makeSnapshot = useCallback(
+    () => ({
+      v: 1,
+      sig,
+      transforms: nodes
+        .filter((n) => n.type !== 'jsonNode')
+        .map((n) => ({
+          id: n.id,
+          type: n.type,
+          position: n.position,
+          width: n.width,
+          data: { label: n.data.label, transformId: n.data.transformId, kind: n.data.kind },
+        })),
+      edges: edges.map(
+        ({ id, source, sourceHandle, target, targetHandle, selected }) => ({
+          id,
+          source,
+          sourceHandle,
+          target,
+          targetHandle,
+          selected,
+        }),
+      ),
+      sel,
+      positions: Object.fromEntries(
+        nodes
+          .filter((n) => n.id === 'json-root' || n.id === 'fields')
+          .map((n) => [n.id, n.position]),
+      ),
+      fieldsRemoved: !nodes.some((n) => n.id === 'fields'),
+      nodeParams,
+      collapsed: Object.fromEntries(
+        Object.entries(collapsed).map(([k, s]) => [k, [...s]]),
+      ),
+    }),
+    [nodes, edges, nodeParams, collapsed, sel, sig],
+  )
+
+  useEffect(() => {
+    if (apiRef)
+      apiRef.current = {
+        serializeGraph: makeSnapshot,
+        restoreGraph: (g) => {
+          restoredRef.current = g
+          lastBuildRef.current = null
+          setRestoreTick((t) => t + 1)
+        },
+        getNodeInput: (nodeId) => nodeParams[nodeId]?.value,
+        setNodeInput: (nodeId, text) => {
+          const res = validateJson(text)
+          setParam(nodeId, 'value', res.ok ? res.value : {})
+        },
+      }
+    return () => {
+      if (apiRef) apiRef.current = null
+    }
+  }, [apiRef, makeSnapshot, nodeParams, setParam])
 
   useEffect(() => {
     if (!nodes.length) return
     try {
-      localStorage.setItem(
-        GRAPH_KEY,
-        JSON.stringify({
-          v: 1,
-          sig,
-          transforms: nodes
-            .filter((n) => n.type !== 'jsonNode')
-            .map((n) => ({
-              id: n.id,
-              type: n.type,
-              position: n.position,
-              width: n.width,
-              data: { label: n.data.label, transformId: n.data.transformId, kind: n.data.kind },
-            })),
-          edges: edges.map(
-            ({ id, source, sourceHandle, target, targetHandle, selected }) => ({
-              id,
-              source,
-              sourceHandle,
-              target,
-              targetHandle,
-              selected,
-            }),
-          ),
-          sel,
-          positions: Object.fromEntries(
-            nodes
-              .filter((n) => n.id === 'json-root' || n.id === 'fields')
-              .map((n) => [n.id, n.position]),
-          ),
-          fieldsRemoved: !nodes.some((n) => n.id === 'fields'),
-          nodeParams,
-          collapsed: Object.fromEntries(
-            Object.entries(collapsed).map(([k, s]) => [k, [...s]]),
-          ),
-        }),
-      )
+      localStorage.setItem(GRAPH_KEY, JSON.stringify(makeSnapshot()))
     } catch {}
-  }, [nodes, edges, nodeParams, collapsed, sel, sig])
+  }, [nodes, edges, makeSnapshot])
 
   // Migrate nodes created before debugNode was its own type
   useEffect(() => {
@@ -1217,7 +1353,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         <Chip
           size="small"
           color="primary"
-          label={`Linking from “${pendingSource}” — click a field on the right · Esc to cancel`}
+          label={`Linking from “${pendingSource.row}” — click a field on the right · Esc to cancel`}
           sx={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}
         />
       )}
@@ -1248,27 +1384,6 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
   )
 }
 
-function Diagnostic({ item }) {
-  return (
-    <Box sx={{ mt: 1 }}>
-      <Typography variant="body2">
-        {item.message}
-        {item.line != null && ` — line ${item.line}, column ${item.column}`}
-      </Typography>
-      {item.snippet != null && (
-        <Box
-          component="pre"
-          sx={{ fontFamily: 'monospace', fontSize: 11, m: 0, mt: 0.25, overflowX: 'auto' }}
-        >
-          {item.snippet}
-          {'\n'}
-          {' '.repeat(Math.max(0, (item.column ?? 1) - 1))}^
-        </Box>
-      )}
-    </Box>
-  )
-}
-
 const loadSavedTexts = () => {
   const fallback = { jsonText: sampleInputText, outputText: sampleOutputText, name: 'sample.json' }
   try {
@@ -1295,12 +1410,12 @@ function App() {
   const [jsonData, setJsonData] = useState(() =>
     initial.input.ok ? { name: initial.texts.name, value: initial.input.value } : null,
   )
-  const [validation, setValidation] = useState(initial.input)
+  const [, setValidation] = useState(initial.input)
   const [outputText, setOutputText] = useState(initial.texts.outputText)
   const [outputData, setOutputData] = useState(() =>
-    initial.output.ok ? initial.output.value : null,
+    initial.output.ok ? stripEmptySource(initial.output.value) : null,
   )
-  const [outputValidation, setOutputValidation] = useState(initial.output)
+  const [, setOutputValidation] = useState(initial.output)
   const fileInputRef = useRef(null)
   const fileOutputRef = useRef(null)
   const openInputPicker = useCallback(() => fileInputRef.current?.click(), [])
@@ -1313,7 +1428,14 @@ function App() {
     }
     const res = validateJson(text)
     setOutputValidation(res)
-    setOutputData(res.ok ? res.value : null)
+    if (!res.ok) {
+      setOutputData(null)
+      return
+    }
+    const cleaned = stripEmptySource(res.value)
+    setOutputData(cleaned)
+    if (JSON.stringify(cleaned) !== JSON.stringify(res.value))
+      setOutputText(JSON.stringify(cleaned, null, 2))
   }, [])
 
   const renderJson = useCallback(
@@ -1354,6 +1476,8 @@ function App() {
     if (pasteState === 'output') {
       setOutputText(pasteText)
       applyOutputText(pasteText)
+    } else if (pasteState?.kind === 'nodeInput') {
+      canvasApiRef.current?.setNodeInput?.(pasteState.nodeId, pasteText)
     } else {
       setJsonText(pasteText)
       renderJson(pasteText)
@@ -1361,14 +1485,199 @@ function App() {
     setPasteState(null)
   }, [pasteState, pasteText, renderJson, applyOutputText])
 
+  const canvasApiRef = useRef(null)
+  const flowFileRef = useRef(null)
+  const flowFilePickerRef = useRef(null)
+  const [saveAs, setSaveAs] = useState(null)
+  const [flowError, setFlowError] = useState(null)
+  const flowText = useCallback(
+    (format) => {
+      const flow = {
+        app: 'json-node-mapper',
+        v: 1,
+        name: flowFileRef.current?.name ?? 'flow',
+        jsonText,
+        outputText,
+        graph: canvasApiRef.current?.serializeGraph?.() ?? null,
+      }
+      return format === 'yaml' ? yamlStringify(flow) : JSON.stringify(flow, null, 2)
+    },
+    [jsonText, outputText],
+  )
+
+  const writeFlowHandle = useCallback(
+    async (handle) => {
+      const w = await handle.createWritable()
+      await w.write(
+        flowText(/\.ya?ml$/i.test(handle.name) ? 'yaml' : 'json'),
+      )
+      await w.close()
+    },
+    [flowText],
+  )
+
+  const downloadFlow = useCallback(
+    (name, format) => {
+      const blob = new Blob([flowText(format)], {
+        type: format === 'yaml' ? 'text/yaml' : 'application/json',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${name}.${format === 'yaml' ? 'yaml' : 'json'}`
+      a.click()
+      URL.revokeObjectURL(url)
+      flowFileRef.current = { name, format, handle: null }
+    },
+    [flowText],
+  )
+
+  const onSaveAsFlow = useCallback(async () => {
+    if (typeof window.showSaveFilePicker === 'function') {
+      try {
+        const f = flowFileRef.current
+        const handle = await window.showSaveFilePicker({
+          suggestedName: `${f?.name ?? 'flow'}.${f?.format === 'yaml' ? 'yaml' : 'json'}`,
+          types: [
+            { description: 'JSON', accept: { 'application/json': ['.json'] } },
+            { description: 'YAML', accept: { 'text/yaml': ['.yaml', '.yml'] } },
+          ],
+        })
+        await writeFlowHandle(handle)
+        flowFileRef.current = {
+          name: handle.name.replace(/\.(json|ya?ml)$/i, ''),
+          format: /\.ya?ml$/i.test(handle.name) ? 'yaml' : 'json',
+          handle,
+        }
+      } catch (err) {
+        if (err?.name !== 'AbortError') setFlowError(`Save failed: ${err?.message ?? err}`)
+      }
+      return
+    }
+    setSaveAs({
+      name: flowFileRef.current?.name ?? 'flow',
+      format: flowFileRef.current?.format ?? 'json',
+    })
+  }, [writeFlowHandle])
+
+  const onSaveFlow = useCallback(async () => {
+    const f = flowFileRef.current
+    if (f?.handle) {
+      try {
+        await writeFlowHandle(f.handle)
+        return
+      } catch {
+        // handle stale/revoked — fall through to pick a new file
+      }
+    }
+    if (typeof window.showSaveFilePicker === 'function') {
+      await onSaveAsFlow()
+      return
+    }
+    if (f) downloadFlow(f.name, f.format)
+    else setSaveAs({ name: 'flow', format: 'json' })
+  }, [writeFlowHandle, onSaveAsFlow, downloadFlow])
+
+  const onLoadFlow = useCallback(
+    (file, handle = null) => {
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const isYaml = /\.ya?ml$/i.test(file.name)
+        const base = file.name.replace(/\.(json|ya?ml)$/i, '')
+        try {
+          const text = String(reader.result)
+          const flow = isYaml ? yamlParse(text) : JSON.parse(text)
+          if (!flow || typeof flow !== 'object' || !flow.graph) {
+            setFlowError(`“${file.name}” is not a valid flow file`)
+            return
+          }
+          const inText = flow.jsonText ?? ''
+          const outText = flow.outputText ?? ''
+          setFlowError(null)
+          setJsonText(inText)
+          setOutputText(outText)
+          renderJson(inText, base, outText)
+          canvasApiRef.current?.restoreGraph?.(flow.graph)
+          flowFileRef.current = { name: base, format: isYaml ? 'yaml' : 'json', handle }
+        } catch {
+          setFlowError(`Could not parse “${file.name}” as ${isYaml ? 'YAML' : 'JSON'}`)
+        }
+      }
+      reader.readAsText(file)
+    },
+    [renderJson],
+  )
+
+  const openFlowPicker = useCallback(async () => {
+    if (typeof window.showOpenFilePicker === 'function') {
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [
+            {
+              description: 'Flow',
+              accept: { 'application/json': ['.json'], 'text/yaml': ['.yaml', '.yml'] },
+            },
+          ],
+          multiple: false,
+        })
+        onLoadFlow(await handle.getFile(), handle)
+      } catch (err) {
+        if (err?.name !== 'AbortError') setFlowError(`Open failed: ${err?.message ?? err}`)
+      }
+      return
+    }
+    flowFilePickerRef.current?.click()
+  }, [onLoadFlow])
+
+  const pendingNodeInputRef = useRef(null)
+  const onBrowseNodeInput = useCallback((nodeId) => {
+    pendingNodeInputRef.current = nodeId
+    fileInputRef.current?.click()
+  }, [])
+  const onPasteNodeInput = useCallback(
+    (nodeId) => {
+      const cur = canvasApiRef.current?.getNodeInput?.(nodeId)
+      setPasteText(cur !== undefined ? JSON.stringify(cur, null, 2) : jsonText)
+      setPasteState({ kind: 'nodeInput', nodeId })
+    },
+    [jsonText],
+  )
+
+  const onNewFlow = useCallback(() => {
+    setFlowError(null)
+    flowFileRef.current = null
+    setJsonText('')
+    setValidation({ ok: true, errors: [], warnings: [] })
+    setJsonData(null)
+    setOutputText('')
+    applyOutputText('')
+    canvasApiRef.current?.restoreGraph?.({
+      v: 1,
+      transforms: [],
+      edges: [],
+      sel: null,
+      positions: {},
+      fieldsRemoved: true,
+      nodeParams: {},
+      collapsed: {},
+    })
+    localStorage.removeItem(GRAPH_KEY)
+  }, [applyOutputText])
+
   const handleFile = useCallback(
     (file) => {
       if (!file) return
       const reader = new FileReader()
       reader.onload = () => {
         const text = String(reader.result)
-        setJsonText(text)
-        renderJson(text, file.name)
+        const nid = pendingNodeInputRef.current
+        pendingNodeInputRef.current = null
+        if (nid) canvasApiRef.current?.setNodeInput?.(nid, text)
+        else {
+          setJsonText(text)
+          renderJson(text, file.name)
+        }
       }
       reader.onerror = () =>
         setValidation({
@@ -1382,7 +1691,7 @@ function App() {
   )
 
   const onUpdateOutput = useCallback((next) => {
-    const text = JSON.stringify(next, null, 2)
+    const text = JSON.stringify(stripEmptySource(next), null, 2)
     setOutputText(text)
     const res = validateJson(text)
     setOutputValidation(res)
@@ -1428,8 +1737,6 @@ function App() {
     } catch {}
   }, [jsonText, outputText, jsonData])
 
-  const propCount = jsonData ? toEntries(jsonData.value).length : 0
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <AppBar position="static" elevation={0} sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
@@ -1462,131 +1769,82 @@ function App() {
         >
           <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
-              <Typography variant="subtitle2">JSON input</Typography>
+              <Typography variant="subtitle2">Flow</Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ px: 0, pt: 0 }}>
-              <TextField
-                multiline
-                fullWidth
-                minRows={12}
-                maxRows={20}
-                placeholder="Paste JSON here…"
-                value={jsonText}
-                onChange={(e) => setJsonText(e.target.value)}
-                spellCheck={false}
-                sx={MONO_TEXTFIELD_SX}
-              />
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<UploadFileIcon />}
-                onClick={openInputPicker}
-                sx={{ mt: 1 }}
-              >
-                Browse…
-              </Button>
+              <Stack spacing={0.5}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<NoteAddIcon />}
+                  onClick={onNewFlow}
+                  sx={{ justifyContent: 'flex-start' }}
+                >
+                  New
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<SaveIcon />}
+                  onClick={onSaveFlow}
+                  sx={{ justifyContent: 'flex-start' }}
+                >
+                  Save
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<SaveAsIcon />}
+                  onClick={onSaveAsFlow}
+                  sx={{ justifyContent: 'flex-start' }}
+                >
+                  Save As…
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<FolderOpenIcon />}
+                  onClick={openFlowPicker}
+                  sx={{ justifyContent: 'flex-start' }}
+                >
+                  Load from…
+                </Button>
+              </Stack>
               <input
-                ref={fileInputRef}
+                ref={flowFilePickerRef}
                 type="file"
-                accept=".json,application/json"
+                accept=".json,.yaml,.yml,application/json,text/yaml"
                 hidden
-                onChange={(e) => handleFile(e.target.files?.[0])}
+                onChange={(e) => {
+                  onLoadFlow(e.target.files?.[0])
+                  e.target.value = ''
+                }}
               />
-              {validation && !validation.ok && (
+              {flowError && (
                 <Alert severity="error" sx={{ mt: 1 }}>
-                  <Typography variant="subtitle2">Invalid JSON</Typography>
-                  {validation.errors.map((e, i) => (
-                    <Diagnostic key={i} item={e} />
-                  ))}
-                </Alert>
-              )}
-              {validation?.warnings.length > 0 && (
-                <Alert severity="warning" sx={{ mt: 1 }}>
-                  <Typography variant="subtitle2">
-                    {validation.warnings.length === 1
-                      ? '1 warning'
-                      : `${validation.warnings.length} warnings`}
-                  </Typography>
-                  {validation.warnings.map((w, i) => (
-                    <Diagnostic key={i} item={w} />
-                  ))}
-                </Alert>
-              )}
-              {jsonData && (
-                <Alert severity="success" sx={{ mt: 1 }}>
-                  Loaded “{jsonData.name}” — {propCount}{' '}
-                  {propCount === 1 ? 'property' : 'properties'}
+                  {flowError}
                 </Alert>
               )}
             </AccordionDetails>
           </Accordion>
 
-          <Accordion disableGutters elevation={0} defaultExpanded sx={ACCORDION_SX}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={ACCORDION_SUMMARY_SX}>
-              <Typography variant="subtitle2">JSON output — structure</Typography>
-            </AccordionSummary>
-            <AccordionDetails sx={{ px: 0, pt: 0 }}>
-              <TextField
-                multiline
-                fullWidth
-                minRows={8}
-                maxRows={16}
-                placeholder="Output node structure…"
-                value={outputText}
-                onChange={(e) => setOutputText(e.target.value)}
-                spellCheck={false}
-                sx={MONO_TEXTFIELD_SX}
-              />
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<UploadFileIcon />}
-                onClick={openOutputPicker}
-                sx={{ mt: 1 }}
-              >
-                Browse…
-              </Button>
-              <input
-                ref={fileOutputRef}
-                type="file"
-                accept=".json,application/json"
-                hidden
-                onChange={(e) => handleOutputFile(e.target.files?.[0])}
-              />
-              {outputValidation && !outputValidation.ok && (
-                <Alert severity="error" sx={{ mt: 1 }}>
-                  <Typography variant="subtitle2">Invalid JSON</Typography>
-                  {outputValidation.errors.map((e, i) => (
-                    <Diagnostic key={i} item={e} />
-                  ))}
-                </Alert>
-              )}
-              {outputValidation?.warnings.length > 0 && (
-                <Alert severity="warning" sx={{ mt: 1 }}>
-                  <Typography variant="subtitle2">
-                    {outputValidation.warnings.length === 1
-                      ? '1 warning'
-                      : `${outputValidation.warnings.length} warnings`}
-                  </Typography>
-                  {outputValidation.warnings.map((w, i) => (
-                    <Diagnostic key={i} item={w} />
-                  ))}
-                </Alert>
-              )}
-            </AccordionDetails>
-          </Accordion>
-
-          <Stack direction="row" spacing={1}>
-            <Button
-              variant="contained"
-              onClick={() => renderJson(jsonText)}
-              disabled={!jsonText.trim()}
-            >
-              Render node
-            </Button>
-          </Stack>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(e) => handleFile(e.target.files?.[0])}
+          />
+          <input
+            ref={fileOutputRef}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(e) => handleOutputFile(e.target.files?.[0])}
+          />
 
           <Divider />
+          <Typography variant="subtitle2">Nodes</Typography>
           <TextField
             size="small"
             variant="outlined"
@@ -1885,8 +2143,57 @@ function App() {
               </Button>
             </DialogActions>
           </Dialog>
+          <Dialog
+            open={!!saveAs}
+            onClose={() => setSaveAs(null)}
+            maxWidth="xs"
+            fullWidth
+          >
+            <DialogTitle>Save flow as</DialogTitle>
+            <DialogContent>
+              <TextField
+                autoFocus
+                fullWidth
+                size="small"
+                label="File name"
+                value={saveAs?.name ?? ''}
+                onChange={(e) =>
+                  setSaveAs((s) => ({ ...s, name: e.target.value }))
+                }
+                sx={{ mt: 1 }}
+              />
+              <TextField
+                select
+                fullWidth
+                size="small"
+                label="Format"
+                value={saveAs?.format ?? 'json'}
+                onChange={(e) =>
+                  setSaveAs((s) => ({ ...s, format: e.target.value }))
+                }
+                sx={{ mt: 1.5 }}
+              >
+                <MenuItem value="json">JSON (.json)</MenuItem>
+                <MenuItem value="yaml">YAML (.yaml)</MenuItem>
+              </TextField>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setSaveAs(null)}>Cancel</Button>
+              <Button
+                variant="contained"
+                disabled={!saveAs?.name?.trim()}
+                onClick={() => {
+                  downloadFlow(saveAs.name.trim(), saveAs.format)
+                  setSaveAs(null)
+                }}
+              >
+                Save
+              </Button>
+            </DialogActions>
+          </Dialog>
           <ReactFlowProvider>
             <Canvas
+              apiRef={canvasApiRef}
               jsonData={jsonData}
               outputData={outputData}
               onBrowseFile={openInputPicker}
@@ -1894,6 +2201,8 @@ function App() {
               onBrowseOutput={openOutputPicker}
               onPasteOutput={onPasteOutput}
               onUpdateOutput={onUpdateOutput}
+              onBrowseNodeInput={onBrowseNodeInput}
+              onPasteNodeInput={onPasteNodeInput}
               sig={hashStr(
                 JSON.stringify(jsonData?.value ?? null) +
                   '' +

@@ -9,6 +9,7 @@ import EditIcon from '@mui/icons-material/Edit'
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
 import AddIcon from '@mui/icons-material/Add'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
+import RenameTitle from '../RenameTitle.jsx'
 
 export const TYPE_COLORS = {
   string: '#66d19e',
@@ -119,7 +120,6 @@ function JsonNode({ data, selected, footer }) {
       name: row.key,
       type: f.type ?? 'string',
       unit: f.unit ?? '',
-      source: f.source ?? '',
     })
   }
 
@@ -128,7 +128,6 @@ function JsonNode({ data, selected, footer }) {
       name: edit.name.trim() || edit.row.key,
       type: edit.type,
       unit: edit.unit.trim(),
-      source: edit.source.trim(),
     })
     setEdit(null)
   }
@@ -193,19 +192,24 @@ function JsonNode({ data, selected, footer }) {
           color: 'primary.contrastText',
         }}
       >
-        <Typography variant="subtitle2" noWrap sx={{ fontWeight: 700 }}>
-          {name}
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, minWidth: 0, flex: 1 }}>
+          <RenameTitle
+            variant="subtitle2"
+            value={name}
+            onRename={data.onRename}
+            sx={{ fontWeight: 700 }}
+          />
           {data.subName && (
             <Typography
               component="span"
               variant="caption"
               noWrap
-              sx={{ ml: 0.75, opacity: 0.75, fontWeight: 400 }}
+              sx={{ opacity: 0.75, fontWeight: 400 }}
             >
               {data.subName}
             </Typography>
           )}
-        </Typography>
+        </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
           {data.onAddChild && (
             <IconButton
@@ -550,17 +554,6 @@ function JsonNode({ data, selected, footer }) {
               label="Unit"
               value={edit.unit}
               onChange={(e) => setEdit({ ...edit, unit: e.target.value })}
-              onKeyDown={(e) => e.key === 'Enter' && saveField()}
-              slotProps={{
-                inputLabel: { sx: { fontSize: 11 } },
-                htmlInput: { style: { fontFamily: 'monospace', fontSize: 12, padding: '5px 8px' } },
-              }}
-            />
-            <TextField
-              size="small"
-              label="Source"
-              value={edit.source}
-              onChange={(e) => setEdit({ ...edit, source: e.target.value })}
               onKeyDown={(e) => e.key === 'Enter' && saveField()}
               slotProps={{
                 inputLabel: { sx: { fontSize: 11 } },
