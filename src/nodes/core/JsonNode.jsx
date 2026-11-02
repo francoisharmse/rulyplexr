@@ -398,10 +398,16 @@ function JsonNode({ data, selected, footer }) {
                   variant="caption"
                   color="text.secondary"
                   noWrap
-                  sx={{ fontFamily: 'monospace', ml: 'auto', maxWidth: 150, minWidth: 0 }}
-                  title={preview(row.value)}
+                  sx={{
+                    fontFamily: 'monospace',
+                    ml: 'auto',
+                    maxWidth: 150,
+                    minWidth: 0,
+                    ...(computed !== undefined && { color: '#66d19e' }),
+                  }}
+                  title={computed !== undefined ? String(computed) : preview(row.value)}
                 >
-                  {preview(row.value)}
+                  {computed !== undefined ? String(computed) : preview(row.value)}
                 </Typography>
               ) : (
                 computed !== undefined && (

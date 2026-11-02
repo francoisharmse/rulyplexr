@@ -1,6 +1,7 @@
 import IotRuleNode from './IotRuleNode.jsx'
 import ToJsonNode from './ToJsonNode.jsx'
 import ToCsvNode from './ToCsvNode.jsx'
+import ToXmlNode from './ToXmlNode.jsx'
 import { isOn } from '../utils.jsx'
 
 const sortReplacer = (key, val) =>
@@ -33,6 +34,48 @@ export const toJsonString = (v, params = {}) => {
     out = out.replace(/[\u007f-\uffff]/g, (c) =>
       `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
     )
+  return out
+}
+
+const XML_ESCAPES = {
+  '<': '&lt;',
+  '>': '&gt;',
+  '&': '&amp;',
+  '"': '&quot;',
+  "'": '&apos;',
+}
+const escXml = (v) => String(v).replace(/[<>&"']/g, (c) => XML_ESCAPES[c])
+const safeXmlTag = (name, fallback) => {
+  const s = String(name ?? '')
+    .trim()
+    .replace(/[^A-Za-z0-9_.-]/g, '_')
+  return s && /^[A-Za-z_]/.test(s) ? s : fallback
+}
+
+export const toXmlString = (v, params = {}) => {
+  if (v === undefined) return undefined
+  const rootTag = safeXmlTag(params.root, 'root')
+  const itemTag = safeXmlTag(params.item, 'item')
+  const indent = Number(params.indent ?? 2) || 0
+  const pad = ' '.repeat(indent)
+  const nl = indent ? '\n' : ''
+  const node = (val, tag, level) => {
+    const t = safeXmlTag(tag, itemTag)
+    const p = pad.repeat(level)
+    if (val === null || val === undefined) return `${p}<${t}/>`
+    if (typeof val !== 'object') return `${p}<${t}>${escXml(val)}</${t}>`
+    if (Array.isArray(val))
+      return val.length
+        ? `${p}<${t}>${nl}${val.map((x) => node(x, itemTag, level + 1)).join(nl)}${nl}${p}</${t}>`
+        : `${p}<${t}/>`
+    const keys = Object.keys(val)
+    return keys.length
+      ? `${p}<${t}>${nl}${keys.map((k) => node(val[k], k, level + 1)).join(nl)}${nl}${p}</${t}>`
+      : `${p}<${t}/>`
+  }
+  let out = node(v, rootTag, 0)
+  if (isOn(params.declaration))
+    out = `<?xml version="1.0" encoding="UTF-8"?>${nl}` + out
   return out
 }
 
@@ -102,6 +145,30 @@ export const OUTPUT_NODES = {
     ],
     project: (fv) => toJsonValue(fv?.value),
     serialize: (fv, params) => toJsonString(toJsonValue(fv?.value), params),
+  }),
+  to_xml: withDefaults({
+    id: 'to_xml',
+    label: 'To XML',
+    description: 'any input → XML text',
+    component: ToXmlNode,
+    fields: [{ key: 'value', type: 'any', default: undefined }],
+    params: [
+      { key: 'root', label: 'Root element', type: 'text', default: 'root' },
+      { key: 'item', label: 'Array item element', type: 'text', default: 'item' },
+      {
+        key: 'indent',
+        label: 'Indent',
+        type: 'select',
+        default: '2',
+        options: ['0', '1', '2', '4'].map((o) => ({
+          value: o,
+          label: `${o} space${o === '1' ? '' : 's'}`,
+        })),
+      },
+      { key: 'declaration', label: 'XML declaration', type: 'boolean', default: true },
+    ],
+    project: (fv, params) => toXmlString(toJsonValue(fv?.value), params),
+    serialize: (fv, params) => toXmlString(toJsonValue(fv?.value), params),
   }),
   to_csv: withDefaults({
     id: 'to_csv',

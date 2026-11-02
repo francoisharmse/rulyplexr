@@ -61,16 +61,22 @@ import sampleInputText from '../sample_json.json?raw'
 import sampleOutputText from '../sample_output.json?raw'
 
 import TRANSFORMS, { TRANSFORM_LIST } from './nodes/transforms/index.js'
-import OUTPUT_NODES, { OUTPUT_NODE_LIST } from './nodes/output/index.js'
+import OUTPUT_NODES, { OUTPUT_NODE_LIST, toXmlString } from './nodes/output/index.js'
 import DEBUG_NODES, { DEBUG_NODE_LIST } from './nodes/debug/index.js'
 import INPUT_NODES, { INPUT_NODE_LIST } from './nodes/input/index.js'
-import CORE_NODES, { CORE_NODE_LIST, MAPPER_TYPES } from './nodes/core/index.js'
+import CORE_NODES, {
+  CORE_NODE_LIST,
+  MAPPER_TYPES,
+  INPUT_SRC_TYPES,
+  parseXmlToObj,
+} from './nodes/core/index.js'
 
 const NODE_DEFS = { ...OUTPUT_NODES, ...DEBUG_NODES }
 
 const nodeTypes = {
   jsonNode: JsonNode,
   inputJson: JsonNode,
+  xmlInput: JsonNode,
   transform: TransformNode,
   ruleOutput: RuleOutputNode,
   debugNode: DebugNode,
@@ -79,7 +85,7 @@ const nodeTypes = {
   mapperV2: MapperV2Node,
 }
 
-const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, debugNode: 260, stringInput: 220, mapperV1: 360, mapperV2: 360, inputJson: 360 }
+const NODE_WIDTH = { jsonNode: 360, transform: 200, ruleOutput: 260, debugNode: 260, stringInput: 220, mapperV1: 360, mapperV2: 360, inputJson: 360, xmlInput: 360 }
 
 const stripEmptySource = (v) => {
   if (Array.isArray(v)) return v.map(stripEmptySource)
@@ -307,9 +313,31 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
     const edgeVal = (e, depth) => {
       if (!e || depth > 12) return undefined
       const tn = nodeMap[e.source]
-      if (e.source === 'json-root' || tn?.type === 'inputJson') {
+      if (e.source === 'json-root' || INPUT_SRC_TYPES.has(tn?.type)) {
         const path = e.sourceHandle?.slice(2)
-        if (tn?.type === 'inputJson') {
+        if (INPUT_SRC_TYPES.has(tn?.type)) {
+          if (e.sourceHandle === 's-root') {
+            const rebuild = (t, p) => {
+              if (t === null || typeof t !== 'object') {
+                const feed = eds.find(
+                  (x) =>
+                    x.target === e.source && x.targetHandle === `t-${p}`,
+                )
+                return feed ? edgeVal(feed, depth + 1) : t
+              }
+              if (Array.isArray(t))
+                return t.map((el, i) =>
+                  rebuild(el, p ? `${p}.${i}` : String(i)),
+                )
+              return Object.fromEntries(
+                Object.entries(t).map(([k, x]) => [
+                  k,
+                  rebuild(x, p ? `${p}.${k}` : k),
+                ]),
+              )
+            }
+            return rebuild(paramsMap[e.source]?.value, '')
+          }
           const feed = eds.find(
             (x) => x.target === e.source && x.targetHandle === `t-${path}`,
           )
@@ -418,12 +446,12 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
       if (
         conn.source === 'json-root' ||
         conn.source === 'fields' ||
-        sNode?.type === 'inputJson'
+        INPUT_SRC_TYPES.has(sNode?.type)
       ) {
         const root =
           conn.source === 'fields'
             ? outputData
-            : sNode?.type === 'inputJson'
+            : INPUT_SRC_TYPES.has(sNode?.type)
               ? nodeParams[conn.source]?.value
               : jsonData?.value
         const path =
@@ -444,7 +472,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
   const handleRowClick = useCallback(
     (nodeId, rowId) => {
       const srcNode = getNode(nodeId)
-      if (nodeId === 'json-root' || srcNode?.type === 'inputJson') {
+      if (nodeId === 'json-root' || INPUT_SRC_TYPES.has(srcNode?.type)) {
         setPendingSource((p) =>
           p?.node === nodeId && p?.row === rowId
             ? null
@@ -588,17 +616,19 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             label: def.label,
             name: def.label.toUpperCase(),
             value:
-              def.nodeType === 'inputJson' ? {} : (outputData ?? {}),
-            subName: def.nodeType === 'inputJson' ? jsonData?.name : undefined,
-            rootHandle: def.nodeType !== 'inputJson',
+              INPUT_SRC_TYPES.has(def.nodeType) ? {} : (outputData ?? {}),
+            subName: INPUT_SRC_TYPES.has(def.nodeType)
+              ? jsonData?.name
+              : undefined,
+            rootHandle: true,
           },
         },
       ])
-      if (def.nodeType !== 'inputJson' && outputData) {
+      if (!INPUT_SRC_TYPES.has(def.nodeType) && outputData) {
         const live = getNodes()
         const newEdges = []
         for (const s of live.filter(
-          (n) => n.id === 'json-root' || n.type === 'inputJson',
+          (n) => n.id === 'json-root' || INPUT_SRC_TYPES.has(n.type),
         )) {
           const srcVal =
             s.id === 'json-root' ? jsonData?.value : nodeParams[s.id]?.value
@@ -764,7 +794,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             ? !!NODE_DEFS[t.data.kind]
             : t.type === 'stringInput'
               ? !!INPUT_NODES[t.data.kind]
-              : MAPPER_TYPES.has(t.type) || t.type === 'inputJson'
+              : MAPPER_TYPES.has(t.type) || INPUT_SRC_TYPES.has(t.type)
                 ? !!CORE_NODES[t.data.kind]
                 : !!TRANSFORMS[t.data.transformId],
         )
@@ -896,7 +926,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           edgeIds.add(e.id)
           const nxt = forward ? e.target : e.source
           if (nxt === 'fields') rows.fields.add(e.targetHandle?.slice(2))
-          else if (nxt === 'json-root' || getNode(nxt)?.type === 'inputJson')
+          else if (nxt === 'json-root' || INPUT_SRC_TYPES.has(getNode(nxt)?.type))
             (rows[nxt] ??= new Set()).add(e.sourceHandle?.slice(2))
           else {
             tNodes.add(nxt)
@@ -910,7 +940,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
         frontier = next
       }
     }
-    if (sel.nodeId === 'json-root' || getNode(sel.nodeId)?.type === 'inputJson') {
+    if (sel.nodeId === 'json-root' || INPUT_SRC_TYPES.has(getNode(sel.nodeId)?.type)) {
       if (sel.rowId) {
         traverse(edges.filter((e) => e.source === sel.nodeId && e.sourceHandle === `s-${sel.rowId}`), true)
       } else {
@@ -983,6 +1013,173 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             updateNodeInternals(x.id)
       })
     }
+    const makeFieldHandlers = (getObj, commit, inScope) => ({
+      maxDepth: 3,
+      onFieldSave: (path, f) => {
+        const next = JSON.parse(JSON.stringify(getObj() ?? {}))
+        const segs = path.split('.')
+        const parent = segs.slice(0, -1).reduce((o, k) => o?.[k], next)
+        const key = segs[segs.length - 1]
+        const leaf = parent?.[key]
+        if (parent == null || leaf === undefined) return
+        const upd = {
+          ...(leaf !== null && typeof leaf === 'object' ? leaf : {}),
+          type: f.type,
+        }
+        if (f.unit) upd.unit = f.unit
+        else delete upd.unit
+        if (f.source !== undefined) {
+          if (f.source) upd.source = f.source
+          else delete upd.source
+        }
+        if (Array.isArray(parent)) {
+          parent[Number(key)] = upd
+        } else {
+          const newKey =
+            f.name?.trim() && !(f.name.trim() in parent && f.name.trim() !== key)
+              ? f.name.trim()
+              : key
+          const entries = Object.entries(parent).map(([k, v]) =>
+            k === key ? [newKey, upd] : [k, v],
+          )
+          for (const k of Object.keys(parent)) delete parent[k]
+          Object.assign(parent, Object.fromEntries(entries))
+        }
+        commit(next)
+      },
+      onFieldDelete: (path) => {
+        const next = JSON.parse(JSON.stringify(getObj() ?? {}))
+        const segs = path.split('.')
+        const parent = segs.slice(0, -1).reduce((o, k) => o?.[k], next)
+        if (Array.isArray(parent)) parent.splice(Number(segs[segs.length - 1]), 1)
+        else if (parent && typeof parent === 'object') delete parent[segs[segs.length - 1]]
+        commit(next)
+      },
+      onAddChild: (path, f) => {
+        const next = JSON.parse(JSON.stringify(getObj() ?? {}))
+        let parent = next
+        if (path) {
+          const segs = path.split('.')
+          parent = segs.reduce((o, k) => o?.[k], next)
+          if (isField(parent)) {
+            if (parent.type !== 'object' && parent.type !== 'array') return
+            const gp = segs.slice(0, -1).reduce((o, k) => o?.[k], next)
+            const rest = Object.fromEntries(
+              Object.entries(parent).filter(
+                ([k]) => !['type', 'unit', 'source'].includes(k),
+              ),
+            )
+            gp[segs[segs.length - 1]] = parent = parent.type === 'array' ? [] : rest
+          }
+        }
+        const child =
+          f.type === 'object' ? {} : f.type === 'array' ? [] : { type: f.type, unit: f.unit }
+        if (Array.isArray(parent)) {
+          const key = f.name?.trim()
+          parent.push(key ? { [key]: child } : child)
+        } else if (parent && typeof parent === 'object') {
+          const key = f.name?.trim()
+          if (!key) return
+          parent[key] = child
+        } else return
+        commit(next)
+      },
+      onFieldMove: (srcId, dstId, pos) => {
+        if (srcId === dstId) return
+        const sSegs = srcId.split('.')
+        const sParent = sSegs.slice(0, -1).join('.')
+        const dSegs = dstId.split('.')
+        if (sParent !== dSegs.slice(0, -1).join('.')) return
+        const next = JSON.parse(JSON.stringify(getObj() ?? {}))
+        const parent = sParent
+          ? sParent.split('.').reduce((o, k) => o?.[k], next)
+          : next
+        if (!parent || typeof parent !== 'object') return
+        const sKey = sSegs[sSegs.length - 1]
+        const dKey = dSegs[dSegs.length - 1]
+        if (Array.isArray(parent)) {
+          const from = Number(sKey)
+          const to = Number(dKey)
+          if (
+            !Number.isInteger(from) ||
+            !Number.isInteger(to) ||
+            from < 0 ||
+            to < 0 ||
+            from >= parent.length ||
+            to >= parent.length
+          )
+            return
+          const [item] = parent.splice(from, 1)
+          const idx = to > from ? to - 1 : to
+          const insertAt = pos === 'before' ? idx : idx + 1
+          parent.splice(insertAt, 0, item)
+          if (insertAt !== from) {
+            const prefix = `${sParent}.`
+            const mapIdx = (o) =>
+              o === from
+                ? insertAt
+                : insertAt > from && o > from && o <= insertAt
+                  ? o - 1
+                  : insertAt < from && o >= insertAt && o < from
+                    ? o + 1
+                    : o
+            const remapPath = (p) => {
+              if (typeof p !== 'string' || !p.startsWith(prefix)) return p
+              const rest = p.slice(prefix.length)
+              const seg = rest.split('.')[0]
+              const i = Number(seg)
+              if (!seg || !Number.isInteger(i)) return p
+              return `${prefix}${mapIdx(i)}${rest.slice(seg.length)}`
+            }
+            const remapHandle = (h) =>
+              h && (h.startsWith('t-') || h.startsWith('s-'))
+                ? `${h.slice(0, 2)}${remapPath(h.slice(2))}`
+                : h
+            setEdges((es) =>
+              es.map((e) => {
+                const sourceHandle = inScope(e.source)
+                  ? remapHandle(e.sourceHandle)
+                  : e.sourceHandle
+                const targetHandle = inScope(e.target)
+                  ? remapHandle(e.targetHandle)
+                  : e.targetHandle
+                return sourceHandle === e.sourceHandle &&
+                  targetHandle === e.targetHandle
+                  ? e
+                  : { ...e, sourceHandle, targetHandle }
+              }),
+            )
+            setCollapsed((c) =>
+              Object.fromEntries(
+                Object.entries(c).map(([nid, s]) => [
+                  nid,
+                  inScope(nid) ? new Set([...s].map(remapPath)) : s,
+                ]),
+              ),
+            )
+            setSel((s) =>
+              s?.rowId && inScope(s.nodeId)
+                ? { ...s, rowId: remapPath(s.rowId) }
+                : s,
+            )
+            setPendingSource((p) =>
+              p && inScope(p.node) ? { ...p, row: remapPath(p.row) } : p,
+            )
+          }
+        } else {
+          const entries = Object.entries(parent)
+          const from = entries.findIndex(([k]) => k === sKey)
+          const to = entries.findIndex(([k]) => k === dKey)
+          if (from < 0 || to < 0) return
+          const [item] = entries.splice(from, 1)
+          const idx = to > from ? to - 1 : to
+          entries.splice(pos === 'before' ? idx : idx + 1, 0, item)
+          for (const k of Object.keys(parent)) delete parent[k]
+          Object.assign(parent, Object.fromEntries(entries))
+        }
+        commit(next)
+      },
+    })
     setNodes((ns) => {
       const tNodeMap = Object.fromEntries(
         ns.filter((n) => n.type !== 'jsonNode').map((n) => [n.id, n]),
@@ -998,7 +1195,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           selectedIds: [...(highlighted.rows[n.id] ?? [])],
           highlighted: highlighted.tNodes.has(n.id),
           onBrowse:
-            n.type === 'inputJson'
+            INPUT_SRC_TYPES.has(n.type)
               ? () => onBrowseNodeInput?.(n.id)
               : n.id === 'json-root'
                 ? onBrowseFile
@@ -1006,7 +1203,7 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
                   ? onBrowseOutput
                   : undefined,
           onPasteJson:
-            n.type === 'inputJson'
+            INPUT_SRC_TYPES.has(n.type)
               ? () => onPasteNodeInput?.(n.id)
               : n.id === 'json-root'
                 ? onPasteJson
@@ -1014,10 +1211,23 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
                   ? onPasteOutput
                   : undefined,
         }
-        if (n.type === 'inputJson') {
+        if (INPUT_SRC_TYPES.has(n.type)) {
           data.value = nodeParams[n.id]?.value ?? {}
-          data.name = 'INPUT JSON'
+          data.name =
+            CORE_NODES[n.data.kind]?.label.toUpperCase() ?? 'INPUT'
           data.subName = jsonData?.name
+          data.rootHandle = true
+          Object.assign(
+            data,
+            makeFieldHandlers(
+              () => nodeParams[n.id]?.value,
+              (next) => {
+                setParam(n.id, 'value', next)
+                requestAnimationFrame(() => updateNodeInternals(n.id))
+              },
+              (id) => id === n.id,
+            ),
+          )
           const values = {}
           for (const e of edges) {
             if (e.target === n.id && e.targetHandle) {
@@ -1041,171 +1251,14 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
             }
           }
           data.values = values
-          data.onFieldSave = (path, f) => {
-            const next = JSON.parse(JSON.stringify(outputData ?? {}))
-            const segs = path.split('.')
-            const parent = segs.slice(0, -1).reduce((o, k) => o?.[k], next)
-            const key = segs[segs.length - 1]
-            const leaf = parent?.[key]
-            if (parent == null || leaf === undefined) return
-            const upd = {
-              ...(leaf !== null && typeof leaf === 'object' ? leaf : {}),
-              type: f.type,
-            }
-            if (f.unit) upd.unit = f.unit
-            else delete upd.unit
-            if (f.source !== undefined) {
-              if (f.source) upd.source = f.source
-              else delete upd.source
-            }
-            if (Array.isArray(parent)) {
-              parent[Number(key)] = upd
-            } else {
-              const newKey =
-                f.name?.trim() && !(f.name.trim() in parent && f.name.trim() !== key)
-                  ? f.name.trim()
-                  : key
-              const entries = Object.entries(parent).map(([k, v]) =>
-                k === key ? [newKey, upd] : [k, v],
-              )
-              for (const k of Object.keys(parent)) delete parent[k]
-              Object.assign(parent, Object.fromEntries(entries))
-            }
-            commitOutput(next)
-          }
-          data.onFieldDelete = (path) => {
-            const next = JSON.parse(JSON.stringify(outputData ?? {}))
-            const segs = path.split('.')
-            const parent = segs.slice(0, -1).reduce((o, k) => o?.[k], next)
-            if (Array.isArray(parent)) parent.splice(Number(segs[segs.length - 1]), 1)
-            else if (parent && typeof parent === 'object') delete parent[segs[segs.length - 1]]
-            commitOutput(next)
-          }
-          data.maxDepth = 3
-          data.onAddChild = (path, f) => {
-            const next = JSON.parse(JSON.stringify(outputData ?? {}))
-            let parent = next
-            if (path) {
-              const segs = path.split('.')
-              parent = segs.reduce((o, k) => o?.[k], next)
-              if (isField(parent)) {
-                if (parent.type !== 'object' && parent.type !== 'array') return
-                const gp = segs.slice(0, -1).reduce((o, k) => o?.[k], next)
-                const rest = Object.fromEntries(
-                  Object.entries(parent).filter(
-                    ([k]) => !['type', 'unit', 'source'].includes(k),
-                  ),
-                )
-                gp[segs[segs.length - 1]] = parent = parent.type === 'array' ? [] : rest
-              }
-            }
-            const child =
-              f.type === 'object' ? {} : f.type === 'array' ? [] : { type: f.type, unit: f.unit }
-            if (Array.isArray(parent)) {
-              const key = f.name?.trim()
-              parent.push(key ? { [key]: child } : child)
-            } else if (parent && typeof parent === 'object') {
-              const key = f.name?.trim()
-              if (!key) return
-              parent[key] = child
-            } else return
-            commitOutput(next)
-          }
-          data.onFieldMove = (srcId, dstId, pos) => {
-            if (srcId === dstId) return
-            const sSegs = srcId.split('.')
-            const sParent = sSegs.slice(0, -1).join('.')
-            const dSegs = dstId.split('.')
-            if (sParent !== dSegs.slice(0, -1).join('.')) return
-            const next = JSON.parse(JSON.stringify(outputData ?? {}))
-            const parent = sParent
-              ? sParent.split('.').reduce((o, k) => o?.[k], next)
-              : next
-            if (!parent || typeof parent !== 'object') return
-            const sKey = sSegs[sSegs.length - 1]
-            const dKey = dSegs[dSegs.length - 1]
-            if (Array.isArray(parent)) {
-              const from = Number(sKey)
-              const to = Number(dKey)
-              if (
-                !Number.isInteger(from) ||
-                !Number.isInteger(to) ||
-                from < 0 ||
-                to < 0 ||
-                from >= parent.length ||
-                to >= parent.length
-              )
-                return
-              const [item] = parent.splice(from, 1)
-              const idx = to > from ? to - 1 : to
-              const insertAt = pos === 'before' ? idx : idx + 1
-              parent.splice(insertAt, 0, item)
-              if (insertAt !== from) {
-                const prefix = `${sParent}.`
-                const mapIdx = (o) =>
-                  o === from
-                    ? insertAt
-                    : insertAt > from && o > from && o <= insertAt
-                      ? o - 1
-                      : insertAt < from && o >= insertAt && o < from
-                        ? o + 1
-                        : o
-                const remapPath = (p) => {
-                  if (typeof p !== 'string' || !p.startsWith(prefix)) return p
-                  const rest = p.slice(prefix.length)
-                  const seg = rest.split('.')[0]
-                  const i = Number(seg)
-                  if (!seg || !Number.isInteger(i)) return p
-                  return `${prefix}${mapIdx(i)}${rest.slice(seg.length)}`
-                }
-                const remapHandle = (h) =>
-                  h && (h.startsWith('t-') || h.startsWith('s-'))
-                    ? `${h.slice(0, 2)}${remapPath(h.slice(2))}`
-                    : h
-                const isStruct = (id) =>
-                  id === 'fields' || MAPPER_TYPES.has(getNode(id)?.type)
-                setEdges((es) =>
-                  es.map((e) => {
-                    const sourceHandle = isStruct(e.source)
-                      ? remapHandle(e.sourceHandle)
-                      : e.sourceHandle
-                    const targetHandle = isStruct(e.target)
-                      ? remapHandle(e.targetHandle)
-                      : e.targetHandle
-                    return sourceHandle === e.sourceHandle &&
-                      targetHandle === e.targetHandle
-                      ? e
-                      : { ...e, sourceHandle, targetHandle }
-                  }),
-                )
-                setCollapsed((c) =>
-                  Object.fromEntries(
-                    Object.entries(c).map(([nid, s]) => [
-                      nid,
-                      new Set([...s].map(remapPath)),
-                    ]),
-                  ),
-                )
-                setSel((s) =>
-                  s?.rowId ? { ...s, rowId: remapPath(s.rowId) } : s,
-                )
-                setPendingSource((p) =>
-                  p ? { ...p, row: remapPath(p.row) } : p,
-                )
-              }
-            } else {
-              const entries = Object.entries(parent)
-              const from = entries.findIndex(([k]) => k === sKey)
-              const to = entries.findIndex(([k]) => k === dKey)
-              if (from < 0 || to < 0) return
-              const [item] = entries.splice(from, 1)
-              const idx = to > from ? to - 1 : to
-              entries.splice(pos === 'before' ? idx : idx + 1, 0, item)
-              for (const k of Object.keys(parent)) delete parent[k]
-              Object.assign(parent, Object.fromEntries(entries))
-            }
-            commitOutput(next)
-          }
+          Object.assign(
+            data,
+            makeFieldHandlers(
+              () => outputData,
+              commitOutput,
+              (id) => id === 'fields' || MAPPER_TYPES.has(getNode(id)?.type),
+            ),
+          )
           if (n.type === 'mapperV2')
             data.onAddField = (name, type, unit) =>
               data.onAddChild('', { name, type, unit })
@@ -1312,9 +1365,13 @@ function Canvas({ jsonData, outputData, sig, onBrowseFile, onPasteJson, onBrowse
           setRestoreTick((t) => t + 1)
         },
         getNodeInput: (nodeId) => nodeParams[nodeId]?.value,
+        getNodeType: (nodeId) => getNode(nodeId)?.type,
         setNodeInput: (nodeId, text) => {
-          const res = validateJson(text)
-          setParam(nodeId, 'value', res.ok ? res.value : {})
+          const v =
+            getNode(nodeId)?.type === 'xmlInput'
+              ? parseXmlToObj(text)
+              : validateJson(text).value
+          setParam(nodeId, 'value', v ?? {})
         },
       }
     return () => {
@@ -1638,7 +1695,17 @@ function App() {
   const onPasteNodeInput = useCallback(
     (nodeId) => {
       const cur = canvasApiRef.current?.getNodeInput?.(nodeId)
-      setPasteText(cur !== undefined ? JSON.stringify(cur, null, 2) : jsonText)
+      const isXml =
+        canvasApiRef.current?.getNodeType?.(nodeId) === 'xmlInput'
+      setPasteText(
+        cur !== undefined
+          ? isXml
+            ? toXmlString(cur, { indent: '2' })
+            : JSON.stringify(cur, null, 2)
+          : isXml
+            ? ''
+            : jsonText,
+      )
       setPasteState({ kind: 'nodeInput', nodeId })
     },
     [jsonText],
@@ -1831,7 +1898,7 @@ function App() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".json,application/json"
+            accept=".json,.xml,application/json,text/xml"
             hidden
             onChange={(e) => handleFile(e.target.files?.[0])}
           />

@@ -18,6 +18,13 @@ export const CORE_NODES = {
     nodeType: 'inputJson',
     component: JsonNode,
   },
+  input_xml: {
+    id: 'input_xml',
+    label: 'Input XML',
+    description: 'Paste XML — each element becomes a wireable field',
+    nodeType: 'xmlInput',
+    component: JsonNode,
+  },
   json_mapper: {
     id: 'json_mapper',
     label: 'JSON Mapper',
@@ -41,5 +48,7 @@ export const CORE_NODE_LIST = Object.values(CORE_NODES)
 export const MAPPER_TYPES = new Set(
   CORE_NODE_LIST.filter((n) => n.mapper).map((n) => n.nodeType),
 )
+export const INPUT_SRC_TYPES = new Set(['inputJson', 'xmlInput'])
+export { parseXmlToObj } from './xml.js'
 
 export default CORE_NODES

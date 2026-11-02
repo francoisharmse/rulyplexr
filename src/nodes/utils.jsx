@@ -139,6 +139,18 @@ export function ParamControls({ data, params }) {
               )
             })}
           </TextField>
+        ) : spec.type === 'text' ? (
+          <TextField
+            key={spec.key}
+            size="small"
+            label={spec.label}
+            value={p[spec.key] ?? spec.default ?? ''}
+            onChange={(e) => data.onParamChange?.(spec.key, e.target.value)}
+            slotProps={{
+              inputLabel: { sx: { fontSize: 11 } },
+              htmlInput: { style: { fontFamily: 'monospace', fontSize: 12, padding: '5px 8px' } },
+            }}
+          />
         ) : (
           <Box key={spec.key} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <Switch
