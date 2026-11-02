@@ -1,10 +1,11 @@
 import { Handle, NodeResizeControl, Position } from '@xyflow/react'
 import { Box, Chip, Collapse, IconButton, Typography } from '@mui/material'
+import RenameTitle from '../RenameTitle.jsx'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import DEBUG_NODES from './index.js'
-import { TYPE_COLORS } from '../input/JsonNode.jsx'
-import { DumpBox, previewText } from '../utils.jsx'
+import { TYPE_COLORS } from '../core/JsonNode.jsx'
+import { CopyButton, DumpBox, previewText } from '../utils.jsx'
 
 const ACCENT = '#ffa726'
 
@@ -47,9 +48,11 @@ function DebugNode({ data, selected }) {
         }}
       >
         <BugReportIcon sx={{ fontSize: 14 }} />
-        <Typography variant="caption" sx={{ fontWeight: 700 }}>
-          {def?.label ?? data.kind}
-        </Typography>
+        <RenameTitle
+          value={data.label ?? def?.label ?? data.kind}
+          onRename={data.onRename}
+          sx={{ fontWeight: 700 }}
+        />
       </Box>
       <Box>
         {fields.map((f) => {
@@ -117,6 +120,7 @@ function DebugNode({ data, selected }) {
                     {previewText(shown)}
                   </Typography>
                 )}
+                <CopyButton value={shown} accent={ACCENT} />
                 <IconButton
                   size="small"
                   onClick={(e) => {

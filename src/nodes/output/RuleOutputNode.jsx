@@ -1,5 +1,6 @@
 import { Handle, NodeResizeControl, Position } from '@xyflow/react'
-import { Box, Typography } from '@mui/material'
+import { Box } from '@mui/material'
+import RenameTitle from '../RenameTitle.jsx'
 import DataObjectIcon from '@mui/icons-material/DataObject'
 import OUTPUT_NODES from './index.js'
 
@@ -44,9 +45,11 @@ function RuleOutputNode({ data, selected }) {
         }}
       >
         <DataObjectIcon sx={{ fontSize: 14 }} />
-        <Typography variant="caption" sx={{ fontWeight: 700 }}>
-          {def?.label ?? data.kind}
-        </Typography>
+        <RenameTitle
+          value={data.label ?? def?.label ?? data.kind}
+          onRename={data.onRename}
+          sx={{ fontWeight: 700 }}
+        />
         <Handle
           type="source"
           position={Position.Right}

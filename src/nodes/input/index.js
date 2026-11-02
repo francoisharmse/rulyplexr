@@ -87,6 +87,12 @@ export const INPUT_NODES = {
     defaultParams: { value: [''] },
     parse: (p) =>
       Array.isArray(p?.value) ? p.value.map(parseItem) : parseArrayText(p?.value),
+    merge: (vals, p) => [
+      ...vals,
+      ...(Array.isArray(p?.value) ? p.value : [])
+        .filter((s) => String(s ?? '').trim() !== '')
+        .map(parseItem),
+    ],
     coerce: toArray,
   },
 }

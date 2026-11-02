@@ -1,5 +1,6 @@
 import { Handle, NodeResizeControl, Position } from '@xyflow/react'
-import { Box, Typography } from '@mui/material'
+import { Box } from '@mui/material'
+import RenameTitle from '../RenameTitle.jsx'
 import AbcIcon from '@mui/icons-material/Abc'
 import NumbersIcon from '@mui/icons-material/Numbers'
 import ToggleOnIcon from '@mui/icons-material/ToggleOn'
@@ -59,9 +60,11 @@ function InputNode({ data, selected }) {
         }}
       >
         <Icon sx={{ fontSize: 16 }} />
-        <Typography variant="caption" sx={{ fontWeight: 700 }}>
-          {data.label ?? def.label}
-        </Typography>
+        <RenameTitle
+          value={data.label ?? def.label}
+          onRename={data.onRename}
+          sx={{ fontWeight: 700 }}
+        />
       </Box>
       <Box className="nodrag" sx={{ px: 1.25, py: 1 }}>
         {Editor && <Editor data={data} />}
